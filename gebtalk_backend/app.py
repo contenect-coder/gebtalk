@@ -2178,8 +2178,8 @@ def create_call():
     ''', (callee_id, callee_id))
     active_callee_call = cursor.fetchone()
     if active_callee_call:
-        # If the same caller is re-calling a ringing callee, supersede the previous ringing attempt
-        if active_callee_call['caller_id'] == caller_id and active_callee_call['status'] == 'ringing':
+        # If re-calling the same user, or call between these users was open, supersede it immediately
+        if active_callee_call['caller_id'] == caller_id or active_callee_call['callee_id'] == caller_id:
             cursor.execute("UPDATE webrtc_calls SET status = 'ended' WHERE id = %s", (active_callee_call['id'],))
             conn.commit()
         else:
@@ -2193,8 +2193,8 @@ def create_call():
                 created_at = created_at.replace(tzinfo=timezone.utc)
             elapsed = (now - created_at).total_seconds()
             
-            # If call is fresh (< 45s or connected), callee is busy
-            if elapsed < 45 or active_callee_call['status'] == 'connected':
+            # If callee is genuinely on an active call with another third party (< 60s)
+            if elapsed < 60:
                 conn.close()
                 return jsonify({
                     'error': 'Recipient is currently on another call',
