@@ -350,10 +350,28 @@ class AppState extends ChangeNotifier {
 
   Contact? get activeContact {
     if (_activeContactId == null) return null;
+    final target = _activeContactId!.toLowerCase().trim();
     for (final contact in _contacts) {
-      if (contact.id == _activeContactId) return contact;
+      if (contact.id.toLowerCase() == target || (contact.email != null && contact.email!.toLowerCase() == target)) {
+        return contact;
+      }
     }
-    return null;
+    // Dynamic fallback so ChatDetailScreen never gets stuck on infinite loading
+    final displayName = _activeContactId!.contains('@')
+        ? _activeContactId!.split('@')[0].replaceAll('.', ' ').split(' ').map((s) => s.isNotEmpty ? '${s[0].toUpperCase()}${s.substring(1)}' : '').join(' ')
+        : _activeContactId!;
+    return Contact(
+      id: _activeContactId!,
+      name: displayName,
+      phone: '',
+      role: 'Contact',
+      avatar: '',
+      status: 'Available',
+      folder: 'staff',
+      unreadCount: 0,
+      email: _activeContactId!.contains('@') ? _activeContactId : null,
+      tags: [],
+    );
   }
 
   Future<bool> tryAutoLogin() async {

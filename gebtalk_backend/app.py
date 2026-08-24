@@ -301,21 +301,21 @@ def filter_contacts_for_user(contacts, user_profile):
                 allowed_contacts.append(c)
         return allowed_contacts
 
-    # 3. Staff -> View ONLY self + Customers assigned to them
+    # 3. Staff -> View all Staff, Managers, CEO, Support, + Customers assigned to them
     if canonical_role == 'Staff':
         allowed_contacts = []
         for c in contacts:
             cid = str(c.get('id') or '').lower()
+            folder = str(c.get('folder') or '').lower()
+            role = str(c.get('role') or '').lower()
             assigned = str(c.get('assigned_staff_id') or '').lower()
-            if c.get('folder') == 'support' or cid in ('ebi', 'support'):
+            if folder in ('staff', 'support', 'team', 'management') or role in ('staff', 'manager', 'executive', 'ceo', 'support', 'admin') or cid in ('ebi', 'support') or cid in user_aliases:
                 allowed_contacts.append(c)
-            elif cid in user_aliases:
-                allowed_contacts.append(c)
-            elif c.get('folder') == 'customers' and (assigned in user_aliases):
+            elif (folder == 'customers' or role == 'customer') and (assigned in user_aliases):
                 allowed_contacts.append(c)
         return allowed_contacts
 
-    # 4. Customer -> View ONLY self + their ONE assigned Staff specialist
+    # 4. Customer -> View Support + their assigned Staff specialist + Self
     if canonical_role == 'Customer':
         assigned_staff_id = str((user_contact.get('assigned_staff_id') if user_contact else None) or user_profile.get('assigned_staff_id') or '').lower()
         allowed_contacts = []

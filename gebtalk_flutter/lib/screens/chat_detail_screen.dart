@@ -961,9 +961,26 @@ class _ChatDetailContentState extends State<ChatDetailContent>
     });
 
     if (contact == null) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: AppColors.background,
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        appBar: AppBar(
+          backgroundColor: AppColors.surface,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text('Conversation', style: TextStyle(color: Colors.white, fontSize: 16)),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.person_off_rounded, color: Colors.white38, size: 48),
+              SizedBox(height: 12),
+              Text('Contact not available', style: TextStyle(color: Colors.white70, fontSize: 16)),
+            ],
+          ),
+        ),
       );
     }
 

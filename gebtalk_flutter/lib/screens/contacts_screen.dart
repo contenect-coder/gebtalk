@@ -551,14 +551,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF1E293B).withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
-      child: Row(
-        children: [
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            appState.selectContact(contact.id);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => const ChatDetailScreen(),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
           // Avatar with presence
           Stack(
             children: [
@@ -721,11 +735,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
               final webrtcService = Provider.of<WebRtcService>(context, listen: false);
               webrtcService.startCall(contact.id, contact.name, peerAvatar: contact.avatar);
             },
+            ],
           ),
-        ],
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSearchResults(AppState appState) {
     if (_isSearching) {
@@ -786,6 +802,27 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   ],
                 ),
               ),
+              IconButton(
+                icon: const Icon(Icons.chat_bubble_outline_rounded, color: Color(0xFF60A5FA), size: 20),
+                tooltip: 'Message',
+                onPressed: () {
+                  appState.selectContact(user.id.isNotEmpty ? user.id : user.email);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (ctx) => const ChatDetailScreen(),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.call_outlined, color: Color(0xFF10B981), size: 20),
+                tooltip: 'Voice Call',
+                onPressed: () {
+                  final webrtcService = Provider.of<WebRtcService>(context, listen: false);
+                  webrtcService.startCall(user.id.isNotEmpty ? user.id : user.email, user.name, calleeEmail: user.email);
+                },
+              ),
               ElevatedButton.icon(
                 onPressed: () async {
                   final success = await appState.sendContactRequest(targetEmail: user.email);
@@ -803,7 +840,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2563EB),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
