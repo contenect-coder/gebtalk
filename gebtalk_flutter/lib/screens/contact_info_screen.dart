@@ -5,6 +5,7 @@ import '../models/chat_models.dart';
 import '../services/api_service.dart';
 import '../services/webrtc_service.dart';
 import '../theme/colors.dart';
+import '../utils/error_handler.dart';
 import '../widgets/email_call_modal.dart';
 
 class ContactInfoScreen extends StatefulWidget {
@@ -33,7 +34,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> with SingleTicker
 
   void _startAudioCall() {
     final appState = Provider.of<AppState>(context, listen: false);
-    final isSelf = widget.contact.id == appState.currentProfile?.id || (widget.contact.email.isNotEmpty && widget.contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+    final isSelf = widget.contact.id == appState.currentProfile?.id ||
+        ((widget.contact.email?.isNotEmpty ?? false) &&
+            widget.contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
     if (isSelf) {
       ErrorHandler.showError('Voice calls cannot be placed to your own account.');
       return;
@@ -44,7 +47,9 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> with SingleTicker
 
   void _startVideoCall() {
     final appState = Provider.of<AppState>(context, listen: false);
-    final isSelf = widget.contact.id == appState.currentProfile?.id || (widget.contact.email.isNotEmpty && widget.contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+    final isSelf = widget.contact.id == appState.currentProfile?.id ||
+        ((widget.contact.email?.isNotEmpty ?? false) &&
+            widget.contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
     if (isSelf) {
       ErrorHandler.showError('Video calls cannot be placed to your own account.');
       return;

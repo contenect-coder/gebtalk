@@ -6,6 +6,7 @@ import '../providers/app_state.dart';
 import '../services/api_service.dart';
 import '../services/webrtc_service.dart';
 import '../theme/colors.dart';
+import '../utils/error_handler.dart';
 import '../widgets/email_calling_overlay.dart';
 import '../widgets/create_account_modal.dart';
 import '../widgets/ceo_manage_credentials_modal.dart';
@@ -690,12 +691,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
           IconButton(
             icon: Icon(
               Icons.call_outlined,
-              color: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? Colors.white24 : const Color(0xFF10B981),
+              color: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? Colors.white24 : const Color(0xFF10B981),
               size: 19,
             ),
-            tooltip: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? 'Calling disabled for self' : 'Internet Voice Call',
+            tooltip: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? 'Calling disabled for self' : 'Internet Voice Call',
             onPressed: () {
-              final isSelf = contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+              final isSelf = contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
               if (isSelf) {
                 ErrorHandler.showError('Voice calls cannot be placed to your own account.');
                 return;
@@ -707,12 +708,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
           IconButton(
             icon: Icon(
               Icons.videocam_outlined,
-              color: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? Colors.white24 : const Color(0xFF8B5CF6),
+              color: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? Colors.white24 : const Color(0xFF8B5CF6),
               size: 19,
             ),
-            tooltip: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? 'Calling disabled for self' : 'Video Call',
+            tooltip: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? 'Calling disabled for self' : 'Video Call',
             onPressed: () {
-              final isSelf = contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+              final isSelf = contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
               if (isSelf) {
                 ErrorHandler.showError('Video calls cannot be placed to your own account.');
                 return;

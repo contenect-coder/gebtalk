@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
+import '../utils/call_audio_tone_player.dart';
 
 /// Production-ready WebRTC Internet Voice Calling Service for GEBTALK
 /// Provides pure VoIP calling over internet (Wi-Fi / Mobile Data) without SIM or phone numbers.
@@ -29,6 +30,8 @@ class WebRtcService extends ChangeNotifier {
   RTCPeerConnection? _peerConnection;
   MediaStream? localStream;
   MediaStream? remoteStream;
+  final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
+  bool _isRendererInitialized = false;
 
   bool isMuted = false;
   bool isSpeakerOn = false;
@@ -50,6 +53,12 @@ class WebRtcService extends ChangeNotifier {
   void initialize(String userId) {
     if (userId.isEmpty) return;
     currentUserId = userId;
+    if (!_isRendererInitialized) {
+      _isRendererInitialized = true;
+      remoteRenderer.initialize().catchError((e) {
+        debugPrint('[WebRTC] RemoteRenderer init error: $e');
+      });
+    }
     _fetchIceConfig();
     _startIncomingCallPolling();
   }
@@ -119,6 +128,7 @@ class WebRtcService extends ChangeNotifier {
             isCaller = false;
             callState = 'ringing';
             statusMessage = 'Incoming Voice Call...';
+            CallAudioTonePlayer.playIncomingRingtone();
             notifyListeners();
             _startSignalingPolling();
           }
@@ -174,6 +184,8 @@ class WebRtcService extends ChangeNotifier {
               statusMessage = null;
               callStartTime = DateTime.now();
               _startDurationTimer();
+              CallAudioTonePlayer.stopAllTones();
+              CallAudioTonePlayer.playCallConnectedChime();
               notifyListeners();
             }
           }
@@ -292,12 +304,20 @@ class WebRtcService extends ChangeNotifier {
       // Handle remote tracks
       _peerConnection!.onAddStream = (stream) {
         remoteStream = stream;
+        remoteRenderer.srcObject = stream;
+        for (var track in stream.getAudioTracks()) {
+          track.enabled = true;
+        }
         notifyListeners();
       };
       
       _peerConnection!.onTrack = (event) {
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
+          remoteRenderer.srcObject = event.streams[0];
+          for (var track in event.streams[0].getAudioTracks()) {
+            track.enabled = true;
+          }
           notifyListeners();
         }
       };
@@ -346,6 +366,7 @@ class WebRtcService extends ChangeNotifier {
     callState = 'calling';
     statusMessage = 'Calling...';
     errorMessage = null;
+    CallAudioTonePlayer.playOutgoingDialTone();
     notifyListeners();
 
     // 35-second call timeout timer
@@ -477,6 +498,8 @@ class WebRtcService extends ChangeNotifier {
         callStartTime = DateTime.now();
         _startDurationTimer();
         _startSignalingPolling();
+        CallAudioTonePlayer.stopAllTones();
+        CallAudioTonePlayer.playCallConnectedChime();
         notifyListeners();
       } else {
         throw Exception('Server rejected call accept: status ${acceptRes.statusCode}');
@@ -565,6 +588,8 @@ class WebRtcService extends ChangeNotifier {
     } else {
       statusMessage = 'Call Ended';
     }
+    CallAudioTonePlayer.stopAllTones();
+    CallAudioTonePlayer.playCallEndedTone();
     notifyListeners();
 
     _cleanupMedia();
@@ -577,6 +602,7 @@ class WebRtcService extends ChangeNotifier {
   }
 
   void _cleanupMedia() {
+    CallAudioTonePlayer.stopAllTones();
     _stopSignalingPolling();
     _durationTimer?.cancel();
     _callTimeoutTimer?.cancel();
@@ -586,6 +612,7 @@ class WebRtcService extends ChangeNotifier {
     localStream?.dispose();
     localStream = null;
 
+    remoteRenderer.srcObject = null;
     remoteStream?.dispose();
     remoteStream = null;
 

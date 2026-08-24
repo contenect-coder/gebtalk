@@ -1177,11 +1177,11 @@ class _ChatDetailContentState extends State<ChatDetailContent>
               IconButton(
                 icon: Icon(
                   Icons.videocam_rounded,
-                  color: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? Colors.white24 : Colors.white,
+                  color: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? Colors.white24 : Colors.white,
                   size: 22,
                 ),
                 onPressed: () {
-                  final isSelf = contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+                  final isSelf = contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
                   if (isSelf) {
                     ErrorHandler.showError('Voice & video calls are disabled for your own account.');
                     return;
@@ -1189,17 +1189,17 @@ class _ChatDetailContentState extends State<ChatDetailContent>
                   final webrtcService = Provider.of<WebRtcService>(context, listen: false);
                   webrtcService.startCall(contact.id, contact.name, peerAvatar: contact.avatar);
                 },
-                tooltip: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? 'Calling disabled for self' : 'Video Call',
+                tooltip: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? 'Calling disabled for self' : 'Video Call',
               ),
               // Voice Call
               IconButton(
                 icon: Icon(
                   Icons.call_rounded,
-                  color: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? Colors.white24 : Colors.white,
+                  color: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? Colors.white24 : Colors.white,
                   size: 22,
                 ),
                 onPressed: () {
-                  final isSelf = contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase());
+                  final isSelf = contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase());
                   if (isSelf) {
                     ErrorHandler.showError('Voice & video calls are disabled for your own account.');
                     return;
@@ -1207,7 +1207,7 @@ class _ChatDetailContentState extends State<ChatDetailContent>
                   final webrtcService = Provider.of<WebRtcService>(context, listen: false);
                   webrtcService.startCall(contact.id, contact.name, peerAvatar: contact.avatar);
                 },
-                tooltip: (contact.id == appState.currentProfile?.id || (contact.email.isNotEmpty && contact.email.toLowerCase() == appState.userEmail?.toLowerCase())) ? 'Calling disabled for self' : 'Internet Voice Call',
+                tooltip: (contact.id == appState.currentProfile?.id || ((contact.email?.isNotEmpty ?? false) && contact.email?.toLowerCase() == appState.currentProfile?.email?.toLowerCase())) ? 'Calling disabled for self' : 'Internet Voice Call',
               ),
               // Info Panel Toggle
               IconButton(

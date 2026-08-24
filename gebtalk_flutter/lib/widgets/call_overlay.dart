@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import '../services/webrtc_service.dart';
 import '../theme/colors.dart';
@@ -37,15 +38,32 @@ class CallOverlay extends StatelessWidget {
     return Positioned.fill(
       child: Material(
         color: Colors.transparent,
-        child: ClipRRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.82),
-              child: SafeArea(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
+        child: Stack(
+          children: [
+            // Hidden WebRTC audio sink binding to ensure browser speaker output
+            if (webrtcService.remoteStream != null)
+              Positioned(
+                left: -9999,
+                top: -9999,
+                child: SizedBox(
+                  width: 1,
+                  height: 1,
+                  child: RTCVideoView(
+                    webrtcService.remoteRenderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
+                ),
+              ),
+            Positioned.fill(
+              child: ClipRRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.82),
+                    child: SafeArea(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
                     // Top Security Badge
                     Padding(
                       padding: const EdgeInsets.only(top: 36.0),
@@ -192,7 +210,10 @@ class CallOverlay extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ],
+  ),
+),
+);
   }
 
   Widget _buildInitialAvatar(String name) {
