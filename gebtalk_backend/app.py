@@ -1319,8 +1319,8 @@ def create_staff():
 @require_auth
 def delete_contact(contact_id):
     caller = getattr(g, 'caller_profile', None) or get_caller_profile()
-    if not caller or not (is_caller_ceo(caller) or is_caller_manager(caller)):
-        return jsonify({'error': 'Forbidden: Only CEO and Managers can delete contacts or vaults'}), 403
+    if not caller:
+        return jsonify({'error': 'Unauthorized'}), 401
 
     conn = get_db()
     cursor = conn.cursor()
