@@ -1406,7 +1406,12 @@ class AppState extends ChangeNotifier {
 
     try {
       final res = await ApiService.getEmails(folder: _currentEmailFolder, search: search);
-      _emails = res['emails'] as List<EmailMessage>;
+      final rawEmails = res['emails'];
+      if (rawEmails is List) {
+        _emails = rawEmails.map((e) => e is EmailMessage ? e : EmailMessage.fromJson(Map<String, dynamic>.from(e))).toList();
+      } else {
+        _emails = [];
+      }
       _unreadEmailCount = res['unread_count'] is int ? res['unread_count'] : 0;
       final rawCounts = res['counts'] as Map<String, dynamic>? ?? {};
       _emailFolderCounts = rawCounts.map((k, v) => MapEntry(k, v is int ? v : int.tryParse(v.toString()) ?? 0));
