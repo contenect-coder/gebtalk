@@ -2108,7 +2108,29 @@ def get_webrtc_config():
     turn_password = os.environ.get('TURN_PASSWORD')
     
     ice_servers: list[dict] = [
-        {'urls': [stun_url, 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302', 'stun:stun3.l.google.com:19302']}
+        {
+            'urls': [
+                stun_url,
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302',
+                'stun:stun3.l.google.com:19302',
+                'stun:stun4.l.google.com:19302',
+                'stun:stun.services.mozilla.com',
+                'stun:stun.cloudflare.com:3478',
+                'stun:stun.sipgate.net:3478',
+                'stun:global.stun.twilio.com:3478'
+            ]
+        },
+        {
+            'urls': [
+                'turn:openrelay.metered.ca:80',
+                'turn:openrelay.metered.ca:443',
+                'turn:openrelay.metered.ca:443?transport=tcp',
+                'turns:openrelay.metered.ca:443?transport=tcp'
+            ],
+            'username': 'openrelayproject',
+            'credential': 'openrelayproject'
+        }
     ]
     if turn_url:
         turn_entry: dict = {'urls': [turn_url]}
@@ -2120,7 +2142,7 @@ def get_webrtc_config():
         'iceServers': ice_servers,
         'sdpSemantics': 'unified-plan',
         'bundlePolicy': 'balanced',
-        'iceCandidatePoolSize': 2
+        'iceCandidatePoolSize': 4
     })
 
 @app.route('/api/calls/create', methods=['POST'])

@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import '../utils/call_audio_tone_player.dart';
+import '../utils/webrtc_audio_sink.dart';
 
 /// Production-ready WebRTC Internet Voice Calling Service for GEBTALK
 /// Provides pure VoIP calling over internet (Wi-Fi / Mobile Data) without SIM or phone numbers.
@@ -45,7 +46,29 @@ class WebRtcService extends ChangeNotifier {
   
   Map<String, dynamic> _iceConfiguration = {
     'iceServers': [
-      {'urls': ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302']}
+      {
+        'urls': [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
+          'stun:stun.services.mozilla.com',
+          'stun:stun.cloudflare.com:3478',
+          'stun:stun.sipgate.net:3478',
+          'stun:global.stun.twilio.com:3478',
+        ]
+      },
+      {
+        'urls': [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+          'turns:openrelay.metered.ca:443?transport=tcp',
+        ],
+        'username': 'openrelayproject',
+        'credential': 'openrelayproject',
+      }
     ],
     'sdpSemantics': 'unified-plan',
   };
@@ -236,10 +259,16 @@ class WebRtcService extends ChangeNotifier {
         'video': false,
       });
     } catch (e) {
-      debugPrint('[WebRTC] Microphone access warning/fallback: $e');
-      // In headless browser / virtual testing environments without physical microphone attached,
-      // allow call establishment to continue gracefully with receive-only audio.
-      localStream = null;
+      debugPrint('[WebRTC] Complex microphone constraints failed, falling back to simple audio: $e');
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          'audio': true,
+          'video': false,
+        });
+      } catch (e2) {
+        debugPrint('[WebRTC] Microphone access denied or unavailable: $e2');
+        localStream = null;
+      }
     }
     
     try {
@@ -305,6 +334,7 @@ class WebRtcService extends ChangeNotifier {
       _peerConnection!.onAddStream = (stream) {
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
+        WebRtcAudioSink.attachRemoteAudio(stream);
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
         }
@@ -315,6 +345,7 @@ class WebRtcService extends ChangeNotifier {
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
+          WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
           }
@@ -608,6 +639,7 @@ class WebRtcService extends ChangeNotifier {
     _callTimeoutTimer?.cancel();
     _callTimeoutTimer = null;
 
+    WebRtcAudioSink.detachRemoteAudio();
     localStream?.getTracks().forEach((track) => track.stop());
     localStream?.dispose();
     localStream = null;
