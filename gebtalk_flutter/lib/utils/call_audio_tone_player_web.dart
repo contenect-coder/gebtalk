@@ -40,10 +40,10 @@ class CallAudioTonePlayerImpl {
         osc2.frequency.setValueAtTime(480, now);
 
         // Smooth volume envelope: fade in, hold, fade out
-        gain.gain.setValueAtTime(0.001, now);
-        gain.gain.exponentialRampToValueAtTime(0.15, now + 0.08);
-        gain.gain.setValueAtTime(0.15, now + 1.8);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+        gain.gain.setValueAtTime(0.0, now);
+        gain.gain.linearRampToValueAtTime(0.35, now + 0.05);
+        gain.gain.setValueAtTime(0.35, now + 1.85);
+        gain.gain.linearRampToValueAtTime(0.0, now + 2.0);
 
         osc1.connect(gain);
         osc2.connect(gain);
@@ -95,9 +95,9 @@ class CallAudioTonePlayerImpl {
           osc.type = 'triangle';
           osc.frequency.setValueAtTime(note['freq'] as double, noteStart);
 
-          gain.gain.setValueAtTime(0.001, noteStart);
-          gain.gain.exponentialRampToValueAtTime(0.25, noteStart + 0.04);
-          gain.gain.exponentialRampToValueAtTime(0.001, noteStart + noteDur);
+          gain.gain.setValueAtTime(0.0, noteStart);
+          gain.gain.linearRampToValueAtTime(0.40, noteStart + 0.03);
+          gain.gain.linearRampToValueAtTime(0.0, noteStart + noteDur);
 
           osc.connect(gain);
           gain.connect(ctx.destination);
@@ -138,9 +138,9 @@ class CallAudioTonePlayerImpl {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
-        gain.gain.setValueAtTime(0.001, st);
-        gain.gain.exponentialRampToValueAtTime(0.2, st + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, st + dur);
+        gain.gain.setValueAtTime(0.0, st);
+        gain.gain.linearRampToValueAtTime(0.35, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
         gain.connect(ctx.destination);
@@ -174,9 +174,9 @@ class CallAudioTonePlayerImpl {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
-        gain.gain.setValueAtTime(0.001, st);
-        gain.gain.exponentialRampToValueAtTime(0.18, st + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.001, st + dur);
+        gain.gain.setValueAtTime(0.0, st);
+        gain.gain.linearRampToValueAtTime(0.30, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
         gain.connect(ctx.destination);
