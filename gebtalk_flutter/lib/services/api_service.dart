@@ -26,8 +26,8 @@ class ApiService {
     if (kIsWeb) {
       final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
       if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
-        // Production web deployment (e.g. Netlify)
-        return 'https://marilyn-reviews-modify-fascinating.trycloudflare.com/api';
+        // Production web deployment (Netlify /api proxy)
+        return '${Uri.base.origin}/api';
       }
       return 'http://$host:5000/api';
     } else {
