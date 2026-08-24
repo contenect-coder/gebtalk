@@ -1,7 +1,7 @@
 import urllib.request
 import json
 
-BASE_URL = 'https://expanded-node-mary-vacations.trycloudflare.com/api'
+BASE_URL = 'https://gebtalk-app.netlify.app/api'
 caller_id = 'franklin_victor_1787048293'
 callee_id = 'test01_1787056957'
 
