@@ -65,6 +65,11 @@ def serve_uploaded_file(filename):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response
 
+@app.route('/api/health', methods=['GET'])
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok", "service": "gebtalk_backend", "timestamp": int(time.time())})
+
 @app.route('/api/debug/log', methods=['GET'])
 def frontend_debug_log():
     msg = request.args.get('msg', '')
