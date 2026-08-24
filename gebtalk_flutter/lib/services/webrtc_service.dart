@@ -279,6 +279,15 @@ class WebRtcService extends ChangeNotifier {
         localStream!.getTracks().forEach((track) {
           _peerConnection!.addTrack(track, localStream!);
         });
+      } else {
+        try {
+          await _peerConnection!.addTransceiver(
+            kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+            init: RTCRtpTransceiverInit(
+              direction: TransceiverDirection.RecvOnly,
+            ),
+          );
+        } catch (_) {}
       }
 
       // Handle local candidates
@@ -350,6 +359,13 @@ class WebRtcService extends ChangeNotifier {
             track.enabled = true;
           }
           notifyListeners();
+        } else {
+          final track = event.track;
+          if (track.kind == 'audio') {
+            track.enabled = true;
+            WebRtcAudioSink.attachRemoteTrack(track);
+            notifyListeners();
+          }
         }
       };
       return true;

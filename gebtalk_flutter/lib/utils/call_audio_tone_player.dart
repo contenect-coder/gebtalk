@@ -1,7 +1,12 @@
 import 'call_audio_tone_player_stub.dart'
+    if (dart.library.js_interop) 'call_audio_tone_player_web.dart'
     if (dart.library.html) 'call_audio_tone_player_web.dart';
 
 class CallAudioTonePlayer {
+  static void unlockAudio() {
+    CallAudioTonePlayerImpl.unlockAudio();
+  }
+
   static void playOutgoingDialTone() {
     CallAudioTonePlayerImpl.playOutgoingDialTone();
   }

@@ -5,6 +5,10 @@ class WebRtcAudioSinkImpl {
     // Native mobile handles audio through OS audio framework
   }
 
+  static void attachRemoteTrack(MediaStreamTrack track) {
+    // Native mobile cleanup
+  }
+
   static void detachRemoteAudio() {
     // Native mobile cleanup
   }

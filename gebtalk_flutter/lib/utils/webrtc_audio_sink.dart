@@ -8,6 +8,10 @@ class WebRtcAudioSink {
     WebRtcAudioSinkImpl.attachRemoteAudio(stream);
   }
 
+  static void attachRemoteTrack(MediaStreamTrack track) {
+    WebRtcAudioSinkImpl.attachRemoteTrack(track);
+  }
+
   static void detachRemoteAudio() {
     WebRtcAudioSinkImpl.detachRemoteAudio();
   }

@@ -10,9 +10,12 @@ import 'utils/error_handler.dart';
 import 'services/webrtc_service.dart';
 import 'services/api_service.dart';
 import 'widgets/call_overlay.dart';
+import 'utils/call_audio_tone_player.dart';
 import 'dart:ui';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  CallAudioTonePlayer.unlockAudio();
   FlutterError.onError = (FlutterErrorDetails details) {
     debugPrint('FLUTTER ERROR DETECTED: ${details.exception}');
     debugPrint(details.stack?.toString());

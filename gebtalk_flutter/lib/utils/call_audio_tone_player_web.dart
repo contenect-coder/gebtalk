@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:js_interop';
 import 'package:flutter/foundation.dart';
 import 'package:web/web.dart' as web;
 
@@ -6,6 +7,30 @@ class CallAudioTonePlayerImpl {
   static web.AudioContext? _audioContext;
   static Timer? _loopTimer;
   static bool _isPlayingLoop = false;
+  static bool _listenersAttached = false;
+
+  static void unlockAudio() {
+    try {
+      final ctx = _getContext();
+      if (ctx.state == 'suspended') {
+        ctx.resume();
+      }
+      if (!_listenersAttached) {
+        _listenersAttached = true;
+        void onUserGesture(web.Event e) {
+          try {
+            _audioContext?.resume();
+          } catch (_) {}
+        }
+        web.window.addEventListener('click', onUserGesture.toJS);
+        web.window.addEventListener('touchstart', onUserGesture.toJS);
+        web.window.addEventListener('pointerdown', onUserGesture.toJS);
+        web.window.addEventListener('keydown', onUserGesture.toJS);
+      }
+    } catch (e) {
+      debugPrint('[TonePlayer] unlockAudio error: $e');
+    }
+  }
 
   static web.AudioContext _getContext() {
     if (_audioContext == null || _audioContext!.state == 'closed') {
@@ -21,11 +46,15 @@ class CallAudioTonePlayerImpl {
   static void playOutgoingDialTone() {
     stopAllTones();
     _isPlayingLoop = true;
+    unlockAudio();
 
     void playSingleRingback() {
       if (!_isPlayingLoop) return;
       try {
         final ctx = _getContext();
+        if (ctx.state == 'suspended') {
+          ctx.resume();
+        }
         final now = ctx.currentTime;
 
         // Dual Tone: 440 Hz + 480 Hz (Standard North American / International Ringback)
@@ -41,8 +70,8 @@ class CallAudioTonePlayerImpl {
 
         // Smooth volume envelope: fade in, hold, fade out
         gain.gain.setValueAtTime(0.0, now);
-        gain.gain.linearRampToValueAtTime(0.35, now + 0.05);
-        gain.gain.setValueAtTime(0.35, now + 1.85);
+        gain.gain.linearRampToValueAtTime(0.45, now + 0.05);
+        gain.gain.setValueAtTime(0.45, now + 1.85);
         gain.gain.linearRampToValueAtTime(0.0, now + 2.0);
 
         osc1.connect(gain);
@@ -58,9 +87,9 @@ class CallAudioTonePlayerImpl {
       }
     }
 
-    // Play immediately, then repeat every 4.5 seconds
+    // Play immediately, then repeat every 4.0 seconds
     playSingleRingback();
-    _loopTimer = Timer.periodic(const Duration(milliseconds: 4500), (_) {
+    _loopTimer = Timer.periodic(const Duration(milliseconds: 4000), (_) {
       playSingleRingback();
     });
   }
@@ -69,21 +98,25 @@ class CallAudioTonePlayerImpl {
   static void playIncomingRingtone() {
     stopAllTones();
     _isPlayingLoop = true;
+    unlockAudio();
 
     void playMelodicPattern() {
       if (!_isPlayingLoop) return;
       try {
         final ctx = _getContext();
+        if (ctx.state == 'suspended') {
+          ctx.resume();
+        }
         final now = ctx.currentTime;
 
-        // Melodic notes sequence: E5 (659Hz), G#5 (830Hz), B5 (987Hz), E6 (1318Hz)
+        // Clear harmonic musical sequence: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz), E6 (1318Hz)
         final notes = [
-          {'freq': 659.25, 'start': 0.0, 'dur': 0.18},
-          {'freq': 830.61, 'start': 0.2, 'dur': 0.18},
-          {'freq': 987.77, 'start': 0.4, 'dur': 0.18},
-          {'freq': 1318.51, 'start': 0.6, 'dur': 0.35},
-          {'freq': 987.77, 'start': 1.0, 'dur': 0.18},
-          {'freq': 1318.51, 'start': 1.2, 'dur': 0.45},
+          {'freq': 659.25, 'start': 0.0, 'dur': 0.16},
+          {'freq': 830.61, 'start': 0.18, 'dur': 0.16},
+          {'freq': 987.77, 'start': 0.36, 'dur': 0.16},
+          {'freq': 1318.51, 'start': 0.54, 'dur': 0.32},
+          {'freq': 987.77, 'start': 0.90, 'dur': 0.16},
+          {'freq': 1318.51, 'start': 1.08, 'dur': 0.40},
         ];
 
         for (final note in notes) {
@@ -96,7 +129,7 @@ class CallAudioTonePlayerImpl {
           osc.frequency.setValueAtTime(note['freq'] as double, noteStart);
 
           gain.gain.setValueAtTime(0.0, noteStart);
-          gain.gain.linearRampToValueAtTime(0.40, noteStart + 0.03);
+          gain.gain.linearRampToValueAtTime(0.60, noteStart + 0.03);
           gain.gain.linearRampToValueAtTime(0.0, noteStart + noteDur);
 
           osc.connect(gain);
@@ -111,7 +144,7 @@ class CallAudioTonePlayerImpl {
     }
 
     playMelodicPattern();
-    _loopTimer = Timer.periodic(const Duration(milliseconds: 3000), (_) {
+    _loopTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
       playMelodicPattern();
     });
   }
@@ -121,12 +154,16 @@ class CallAudioTonePlayerImpl {
     stopAllTones();
     try {
       final ctx = _getContext();
+      if (ctx.state == 'suspended') {
+        ctx.resume();
+      }
       final now = ctx.currentTime;
 
       final chords = [
-        {'freq': 523.25, 'start': 0.0, 'dur': 0.15}, // C5
-        {'freq': 659.25, 'start': 0.12, 'dur': 0.15}, // E5
-        {'freq': 783.99, 'start': 0.24, 'dur': 0.28}, // G5
+        {'freq': 523.25, 'start': 0.0, 'dur': 0.14}, // C5
+        {'freq': 659.25, 'start': 0.10, 'dur': 0.14}, // E5
+        {'freq': 783.99, 'start': 0.20, 'dur': 0.25}, // G5
+        {'freq': 1046.50, 'start': 0.32, 'dur': 0.35}, // C6
       ];
 
       for (final n in chords) {
@@ -139,7 +176,7 @@ class CallAudioTonePlayerImpl {
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
         gain.gain.setValueAtTime(0.0, st);
-        gain.gain.linearRampToValueAtTime(0.35, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.50, st + 0.02);
         gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
@@ -158,11 +195,15 @@ class CallAudioTonePlayerImpl {
     stopAllTones();
     try {
       final ctx = _getContext();
+      if (ctx.state == 'suspended') {
+        ctx.resume();
+      }
       final now = ctx.currentTime;
 
       final tones = [
-        {'freq': 480.0, 'start': 0.0, 'dur': 0.15},
-        {'freq': 440.0, 'start': 0.18, 'dur': 0.25},
+        {'freq': 480.0, 'start': 0.0, 'dur': 0.12},
+        {'freq': 440.0, 'start': 0.15, 'dur': 0.12},
+        {'freq': 392.0, 'start': 0.30, 'dur': 0.22},
       ];
 
       for (final n in tones) {
@@ -175,7 +216,7 @@ class CallAudioTonePlayerImpl {
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
         gain.gain.setValueAtTime(0.0, st);
-        gain.gain.linearRampToValueAtTime(0.30, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.40, st + 0.02);
         gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
