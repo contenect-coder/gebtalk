@@ -12,4 +12,8 @@ class WebRtcAudioSinkImpl {
   static void detachRemoteAudio() {
     // Native mobile cleanup
   }
+
+  static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
+    // Handled natively via Helper.setSpeakerphoneOn
+  }
 }

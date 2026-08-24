@@ -344,6 +344,7 @@ class WebRtcService extends ChangeNotifier {
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
         WebRtcAudioSink.attachRemoteAudio(stream);
+        WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
         }
@@ -355,6 +356,7 @@ class WebRtcService extends ChangeNotifier {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
+          WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
           }
@@ -364,6 +366,7 @@ class WebRtcService extends ChangeNotifier {
           if (track.kind == 'audio') {
             track.enabled = true;
             WebRtcAudioSink.attachRemoteTrack(track);
+            WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
             notifyListeners();
           }
         }
@@ -729,6 +732,8 @@ class WebRtcService extends ChangeNotifier {
     isSpeakerOn = !isSpeakerOn;
     if (!kIsWeb) {
       Helper.setSpeakerphoneOn(isSpeakerOn);
+    } else {
+      WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
     }
     notifyListeners();
   }
