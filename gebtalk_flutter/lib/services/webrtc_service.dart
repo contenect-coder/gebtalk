@@ -550,6 +550,7 @@ class WebRtcService extends ChangeNotifier {
         _startSignalingPolling();
         CallAudioTonePlayer.stopAllTones();
         CallAudioTonePlayer.playCallConnectedChime();
+        WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
         notifyListeners();
       } else {
         throw Exception('Server rejected call accept: status ${acceptRes.statusCode}');

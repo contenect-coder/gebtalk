@@ -2260,24 +2260,39 @@ def get_incoming_calls():
     
     # Resolve aliases across user_profile, users, and contacts
     cursor.execute('SELECT id, phone, email, username FROM users WHERE id = %s OR email = %s OR username = %s OR phone = %s', (callee_id, callee_id, callee_id, callee_id))
-    u_row = cursor.fetchone()
-    if u_row:
+    for u_row in cursor.fetchall():
         for k in ('id', 'phone', 'email', 'username'):
-            if u_row.get(k): possible_ids.add(str(u_row[k]))
+            if u_row.get(k):
+                possible_ids.add(str(u_row[k]))
+                possible_ids.add(str(u_row[k]).lower())
             
     cursor.execute('SELECT id, phone, email FROM user_profile WHERE id = %s OR phone = %s OR email = %s', (callee_id, callee_id, callee_id))
-    up_row = cursor.fetchone()
-    if up_row:
-        if up_row.get('id'): possible_ids.add(str(up_row['id']))
-        if up_row.get('phone'): possible_ids.add(str(up_row['phone']))
-        if up_row.get('email'): possible_ids.add(str(up_row['email']))
+    for up_row in cursor.fetchall():
+        for k in ('id', 'phone', 'email'):
+            if up_row.get(k):
+                possible_ids.add(str(up_row[k]))
+                possible_ids.add(str(up_row[k]).lower())
         
-    cursor.execute('SELECT id, phone, email FROM contacts WHERE id = %s OR phone = %s OR email = %s', (callee_id, callee_id, callee_id))
-    c_row = cursor.fetchone()
-    if c_row:
-        if c_row.get('id'): possible_ids.add(str(c_row['id']))
-        if c_row.get('phone'): possible_ids.add(str(c_row['phone']))
-        if c_row.get('email'): possible_ids.add(str(c_row['email']))
+    cursor.execute('SELECT id, phone, email, username FROM contacts WHERE id = %s OR phone = %s OR email = %s', (callee_id, callee_id, callee_id))
+    for c_row in cursor.fetchall():
+        for k in ('id', 'phone', 'email', 'username'):
+            if c_row.get(k):
+                possible_ids.add(str(c_row[k]))
+                possible_ids.add(str(c_row[k]).lower())
+                
+    # Pass 2: Expand all emails and phones found to find any linked contact/user IDs
+    known_emails = [e for e in possible_ids if '@' in e]
+    for em in known_emails:
+        cursor.execute('SELECT id FROM contacts WHERE LOWER(email) = %s', (em.lower(),))
+        for r in cursor.fetchall():
+            if r.get('id'):
+                possible_ids.add(str(r['id']))
+                possible_ids.add(str(r['id']).lower())
+        cursor.execute('SELECT id FROM users WHERE LOWER(email) = %s', (em.lower(),))
+        for r in cursor.fetchall():
+            if r.get('id'):
+                possible_ids.add(str(r['id']))
+                possible_ids.add(str(r['id']).lower())
                     
     ids_list = list(possible_ids)
     if not ids_list:
