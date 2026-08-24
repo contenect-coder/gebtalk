@@ -374,10 +374,31 @@ def stitch_contacts(cursor, contacts):
                 msg_dict['reactions'] = []
         messages_by_contact[msg_dict['contact_id']] = msg_dict
 
+    cursor.execute('SELECT id, name, role, email, phone, avatar FROM users')
+    users_rows = cursor.fetchall()
+    user_map = {}
+    for u in users_rows:
+        if u.get('email'):
+            user_map[u['email'].strip().lower()] = u
+        if u.get('id'):
+            user_map[u['id'].strip().lower()] = u
+
     for contact in contacts:
         cid = contact['id']
+        cemail = (contact.get('email') or '').strip().lower()
         contact['tags'] = tags_by_contact.get(cid, [])
         contact['last_message'] = messages_by_contact.get(cid, None)
+
+        # Synchronize authoritative role & folder from user account
+        matched_user = user_map.get(cemail) or user_map.get(str(cid).strip().lower())
+        if matched_user:
+            auth_role = matched_user.get('role') or 'Staff'
+            contact['role'] = auth_role
+            contact['folder'] = 'customers' if auth_role.lower() in ('customer', 'client') else 'staff'
+        elif not contact.get('folder'):
+            r = (contact.get('role') or '').lower()
+            contact['folder'] = 'customers' if ('customer' in r or 'client' in r) else 'staff'
+
     return contacts
 
 @app.route('/')
