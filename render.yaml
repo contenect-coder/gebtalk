@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: gebtalk-backend
-    env: python
-    buildCommand: pip install -r gebtalk_backend/requirements.txt
-    startCommand: cd gebtalk_backend && gunicorn app:app
-    envVars:
-      - key: SUPABASE_DB_URL
-        sync: false # Render will prompt you to paste your real Supabase connection string

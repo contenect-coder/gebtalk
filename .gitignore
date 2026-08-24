@@ -29,3 +29,6 @@ scratch/
 *.apk
 *.bak
 *.log
+*.zip
+gebtalk_backend/uploads/
+netlify_deploy_package/

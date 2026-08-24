@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, g
-from flask_cors import CORS
+from flask_cors import CORS  # type: ignore
 import os
 import json
 import random
@@ -25,7 +25,17 @@ def load_env():
 load_env()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+    response.headers['Access-Control-Allow-Headers'] = '*'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    if request.method == 'OPTIONS':
+        response.status_code = 200
+    return response
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
@@ -210,7 +220,7 @@ def get_caller_profile():
         token = request.args.get('phone') or request.args.get('email')
     if not token:
         return None
-    token_str = str(token).strip()
+    token_str = token.strip()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -823,7 +833,7 @@ def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
-    if file.filename == '':
+    if not file or not file.filename:
         return jsonify({'error': 'No selected file'}), 400
     
     import uuid
@@ -2097,11 +2107,11 @@ def get_webrtc_config():
     turn_username = os.environ.get('TURN_USERNAME')
     turn_password = os.environ.get('TURN_PASSWORD')
     
-    ice_servers = [
+    ice_servers: list[dict] = [
         {'urls': [stun_url, 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302', 'stun:stun3.l.google.com:19302']}
     ]
     if turn_url:
-        turn_entry = {'urls': [turn_url]}
+        turn_entry: dict = {'urls': [turn_url]}
         if turn_username: turn_entry['username'] = turn_username
         if turn_password: turn_entry['credential'] = turn_password
         ice_servers.append(turn_entry)
@@ -3831,6 +3841,8 @@ def change_account_password():
         return jsonify({'error': 'New password must be different from current password'}), 400
 
     user_phone = get_authenticated_phone()
+    if not user_phone:
+        return jsonify({'error': 'Authentication required'}), 401
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -4090,10 +4102,10 @@ def dispatch_meeting_email(recipient_email, subject, html_content):
     smtp_server = os.environ.get('SMTP_SERVER')
     smtp_port = int(os.environ.get('SMTP_PORT', 587))
     smtp_user = os.environ.get('SMTP_USER')
-    smtp_pass = os.environ.get('SMTP_PASSWORD')
+    smtp_pass = os.environ.get('SMTP_PASSWORD') or ''
     sender = os.environ.get('SMTP_FROM', 'meetings@gebtalk.com')
     
-    if not smtp_server or not smtp_user or 'your_' in smtp_user:
+    if not smtp_server or not smtp_user or not smtp_pass or 'your_' in smtp_user:
         print(f"[SIMULATED EMAIL MEETING INVITE] To: {recipient_email}, Subject: {subject}", flush=True)
         return True, "Email invite dispatched (Development Simulation)"
         
@@ -4359,10 +4371,10 @@ def dispatch_transactional_email(recipient_email, subject, html_content):
     smtp_server = os.environ.get('SMTP_SERVER')
     smtp_port = int(os.environ.get('SMTP_PORT', 587))
     smtp_user = os.environ.get('SMTP_USER')
-    smtp_pass = os.environ.get('SMTP_PASSWORD')
+    smtp_pass = os.environ.get('SMTP_PASSWORD') or ''
     sender = os.environ.get('SMTP_FROM', 'notifications@gebtalk.com')
     
-    if not smtp_server or not smtp_user or 'your_' in smtp_user:
+    if not smtp_server or not smtp_user or not smtp_pass or 'your_' in smtp_user:
         print(f"[SIMULATED TRANSACTIONAL EMAIL] To: {recipient_email}, Subject: {subject}", flush=True)
         return True, "Dispatched (Development Simulation)"
         
@@ -4543,7 +4555,8 @@ def verify_profile_email_otp():
     
     # Fetch updated profile
     cursor.execute('SELECT * FROM user_profile WHERE phone = %s OR id = %s', (user_phone, user_phone))
-    updated_profile = dict(cursor.fetchone())
+    profile_row = cursor.fetchone()
+    updated_profile = dict(profile_row) if profile_row else {}
     for key in ['notifications_enabled', 'notification_sound', 'notification_vibration', 'security_2fa', 'read_receipts', 'last_seen_visible']:
         if key in updated_profile:
             updated_profile[key] = bool(updated_profile[key])
@@ -5040,7 +5053,7 @@ def get_email_detail(email_id):
         pass
 
     # Check if sender has a GEBTALK account for 1-tap chat bridge
-    sender_email = r.get('from_address', '')
+    sender_email = (r.get('from_address') or '').strip()
     cursor.execute("SELECT id, name, avatar, phone, username FROM contacts WHERE LOWER(email) = %s LIMIT 1", (sender_email.lower(),))
     linked_contact = cursor.fetchone()
 
@@ -5162,7 +5175,7 @@ def convert_email_to_chat():
         conn.close()
         return jsonify({'error': 'Email not found'}), 404
 
-    sender_email = email_row.get('from_address', '').lower()
+    sender_email = (email_row.get('from_address') or '').strip().lower()
     sender_name = email_row.get('from_name', '') or sender_email
     subject = email_row.get('subject', 'Email Conversation')
     body_snippet = (email_row.get('body_text') or '')[:180]
@@ -5198,7 +5211,7 @@ def convert_email_to_chat():
 
     return jsonify({
         'success': True,
-        'contact': dict(contact),
+        'contact': dict(contact) if contact else {},
         'message': dict(latest_msg) if latest_msg else None,
         'prompt': f'Started in-app chat bridging email: "{subject}"'
     })

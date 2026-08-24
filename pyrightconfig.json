@@ -1,0 +1,8 @@
+{
+  "venvPath": "gebtalk_backend",
+  "venv": ".venv",
+  "extraPaths": [
+    "gebtalk_backend",
+    "gebtalk_backend/.venv/Lib/site-packages"
+  ]
+}
