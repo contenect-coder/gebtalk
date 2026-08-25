@@ -28,6 +28,33 @@ class WebRtcAudioSinkImpl {
   }
 
   static bool _currentSpeakerState = false;
+  static bool _retryListenerAdded = false;
+
+  static void _ensurePlayback(web.HTMLAudioElement elem) {
+    elem.volume = 1.0;
+    elem.muted = false;
+    try {
+      elem.play().toDart.catchError((err) {
+        debugPrint('[WebRtcAudioSink] Audio play blocked by policy, queuing gesture listener: $err');
+        if (!_retryListenerAdded) {
+          _retryListenerAdded = true;
+          void onGesture(web.Event e) {
+            try {
+              elem.volume = 1.0;
+              elem.muted = false;
+              elem.play().toDart.catchError((_) => null);
+            } catch (_) {}
+          }
+          web.window.addEventListener('click', onGesture.toJS);
+          web.window.addEventListener('touchstart', onGesture.toJS);
+          web.window.addEventListener('pointerdown', onGesture.toJS);
+        }
+        return null;
+      });
+    } catch (pe) {
+      debugPrint('[WebRtcAudioSink] play invoke catch: $pe');
+    }
+  }
 
   static void attachRemoteAudio(MediaStream stream) {
     if (!kIsWeb) return;
@@ -40,16 +67,7 @@ class WebRtcAudioSinkImpl {
         final jsMediaStream = dynStream.jsStream;
         if (jsMediaStream != null) {
           elem.srcObject = jsMediaStream;
-          elem.volume = 1.0;
-          elem.muted = false;
-          try {
-            elem.play().toDart.catchError((err) {
-              debugPrint('[WebRtcAudioSink] Audio play catch: $err');
-              return null;
-            });
-          } catch (pe) {
-            debugPrint('[WebRtcAudioSink] play invoke catch: $pe');
-          }
+          _ensurePlayback(elem);
           debugPrint('[WebRtcAudioSink] Bound remote stream to HTMLAudioElement');
           setSpeakerphoneOn(_currentSpeakerState);
         }
@@ -71,16 +89,7 @@ class WebRtcAudioSinkImpl {
         final jsStream = web.MediaStream();
         jsStream.addTrack(jsTrack);
         elem.srcObject = jsStream;
-        elem.volume = 1.0;
-        elem.muted = false;
-        try {
-          elem.play().toDart.catchError((err) {
-            debugPrint('[WebRtcAudioSink] Track play catch: $err');
-            return null;
-          });
-        } catch (pe) {
-          debugPrint('[WebRtcAudioSink] Track play invoke catch: $pe');
-        }
+        _ensurePlayback(elem);
         debugPrint('[WebRtcAudioSink] Bound remote track to HTMLAudioElement');
         setSpeakerphoneOn(_currentSpeakerState);
       }

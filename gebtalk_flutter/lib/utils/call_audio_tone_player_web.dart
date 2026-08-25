@@ -19,7 +19,9 @@ class CallAudioTonePlayerImpl {
         _listenersAttached = true;
         void onUserGesture(web.Event e) {
           try {
-            _audioContext?.resume();
+            if (_audioContext != null && _audioContext!.state == 'suspended') {
+              _audioContext!.resume();
+            }
           } catch (_) {}
         }
         web.window.addEventListener('click', onUserGesture.toJS);
@@ -55,9 +57,9 @@ class CallAudioTonePlayerImpl {
         if (ctx.state == 'suspended') {
           ctx.resume();
         }
-        final now = ctx.currentTime;
+        final now = ctx.currentTime + 0.05;
 
-        // Dual Tone: 440 Hz + 480 Hz (Standard North American / International Ringback)
+        // Dual Tone: 440 Hz + 480 Hz (Standard International Ringback)
         final osc1 = ctx.createOscillator();
         final osc2 = ctx.createOscillator();
         final gain = ctx.createGain();
@@ -68,10 +70,10 @@ class CallAudioTonePlayerImpl {
         osc2.type = 'sine';
         osc2.frequency.setValueAtTime(480, now);
 
-        // Smooth volume envelope: fade in, hold, fade out
+        // Smooth volume envelope: fade in, hold at clear 0.70 gain, fade out
         gain.gain.setValueAtTime(0.0, now);
-        gain.gain.linearRampToValueAtTime(0.45, now + 0.05);
-        gain.gain.setValueAtTime(0.45, now + 1.85);
+        gain.gain.linearRampToValueAtTime(0.70, now + 0.06);
+        gain.gain.setValueAtTime(0.70, now + 1.85);
         gain.gain.linearRampToValueAtTime(0.0, now + 2.0);
 
         osc1.connect(gain);
@@ -107,9 +109,9 @@ class CallAudioTonePlayerImpl {
         if (ctx.state == 'suspended') {
           ctx.resume();
         }
-        final now = ctx.currentTime;
+        final now = ctx.currentTime + 0.05;
 
-        // Clear harmonic musical sequence: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz), E6 (1318Hz)
+        // Clear harmonic musical sequence: E5 (659Hz), G#5 (830Hz), B5 (987Hz), E6 (1318Hz), B5 (987Hz), E6 (1318Hz)
         final notes = [
           {'freq': 659.25, 'start': 0.0, 'dur': 0.16},
           {'freq': 830.61, 'start': 0.18, 'dur': 0.16},
@@ -129,7 +131,7 @@ class CallAudioTonePlayerImpl {
           osc.frequency.setValueAtTime(note['freq'] as double, noteStart);
 
           gain.gain.setValueAtTime(0.0, noteStart);
-          gain.gain.linearRampToValueAtTime(0.60, noteStart + 0.03);
+          gain.gain.linearRampToValueAtTime(0.85, noteStart + 0.03);
           gain.gain.linearRampToValueAtTime(0.0, noteStart + noteDur);
 
           osc.connect(gain);
@@ -157,7 +159,7 @@ class CallAudioTonePlayerImpl {
       if (ctx.state == 'suspended') {
         ctx.resume();
       }
-      final now = ctx.currentTime;
+      final now = ctx.currentTime + 0.05;
 
       final chords = [
         {'freq': 523.25, 'start': 0.0, 'dur': 0.14}, // C5
@@ -176,7 +178,7 @@ class CallAudioTonePlayerImpl {
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
         gain.gain.setValueAtTime(0.0, st);
-        gain.gain.linearRampToValueAtTime(0.50, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.75, st + 0.02);
         gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
@@ -186,8 +188,8 @@ class CallAudioTonePlayerImpl {
         osc.stop(st + dur);
       }
 
-      // Suspend Web Audio context once connected chime finishes playing (allowing VoIP communications mode to take priority)
-      Future.delayed(const Duration(milliseconds: 750), () {
+      // Suspend Web Audio context once connected chime finishes playing
+      Future.delayed(const Duration(milliseconds: 900), () {
         if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
           try {
             _audioContext!.suspend();
@@ -207,7 +209,7 @@ class CallAudioTonePlayerImpl {
       if (ctx.state == 'suspended') {
         ctx.resume();
       }
-      final now = ctx.currentTime;
+      final now = ctx.currentTime + 0.05;
 
       final tones = [
         {'freq': 480.0, 'start': 0.0, 'dur': 0.12},
@@ -225,7 +227,7 @@ class CallAudioTonePlayerImpl {
         osc.frequency.setValueAtTime(n['freq'] as double, st);
 
         gain.gain.setValueAtTime(0.0, st);
-        gain.gain.linearRampToValueAtTime(0.40, st + 0.02);
+        gain.gain.linearRampToValueAtTime(0.65, st + 0.02);
         gain.gain.linearRampToValueAtTime(0.0, st + dur);
 
         osc.connect(gain);
@@ -235,7 +237,7 @@ class CallAudioTonePlayerImpl {
         osc.stop(st + dur);
       }
 
-      Future.delayed(const Duration(milliseconds: 600), () {
+      Future.delayed(const Duration(milliseconds: 700), () {
         if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
           try {
             _audioContext!.suspend();
