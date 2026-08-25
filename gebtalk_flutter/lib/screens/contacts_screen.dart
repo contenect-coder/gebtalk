@@ -735,13 +735,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
               final webrtcService = Provider.of<WebRtcService>(context, listen: false);
               webrtcService.startCall(contact.id, contact.name, peerAvatar: contact.avatar);
             },
-            ],
+          ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildSearchResults(AppState appState) {
     if (_isSearching) {
