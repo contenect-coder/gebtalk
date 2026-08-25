@@ -336,6 +336,7 @@ class WebRtcService extends ChangeNotifier {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
+          'channelCount': 1,
         },
         'video': false,
       });
@@ -403,6 +404,9 @@ class WebRtcService extends ChangeNotifier {
           }
           if (!kIsWeb) {
             Helper.setSpeakerphoneOn(isSpeakerOn);
+            Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+            Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+            Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
           } else {
             WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
           }
@@ -431,8 +435,15 @@ class WebRtcService extends ChangeNotifier {
       _peerConnection!.onAddStream = (stream) {
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
+        remoteRenderer.muted = true; // Mute internal renderer audio so only WebRtcAudioSink handles voice output
         WebRtcAudioSink.attachRemoteAudio(stream);
         WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
+        if (!kIsWeb) {
+          Helper.setSpeakerphoneOn(isSpeakerOn);
+          Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+          Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+          Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+        }
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
         }
@@ -443,8 +454,15 @@ class WebRtcService extends ChangeNotifier {
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
+          remoteRenderer.muted = true;
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
           WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
+          if (!kIsWeb) {
+            Helper.setSpeakerphoneOn(isSpeakerOn);
+            Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+            Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+            Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+          }
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
           }
@@ -455,6 +473,12 @@ class WebRtcService extends ChangeNotifier {
             track.enabled = true;
             WebRtcAudioSink.attachRemoteTrack(track);
             WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
+            if (!kIsWeb) {
+              Helper.setSpeakerphoneOn(isSpeakerOn);
+              Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+              Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+              Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
+            }
             notifyListeners();
           }
         }

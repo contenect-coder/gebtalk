@@ -143,16 +143,30 @@ class WebRtcAudioSinkImpl {
             }
           }
           
-          final finalId = targetDeviceId ?? (isSpeaker ? 'default' : '');
-          
-          try {
+          if (!isSpeaker) {
+            // Earpiece target
             final dynamic dynElem = elem;
             if (dynElem.setSinkId != null) {
-              await dynElem.setSinkId(finalId.toJS);
-              debugPrint('[WebRtcAudioSink] Applied audio sink: "$finalId" (speaker=$isSpeaker)');
+              try {
+                final sink = targetDeviceId ?? '';
+                await dynElem.setSinkId(sink.toJS);
+                debugPrint('[WebRtcAudioSink] Applied earpiece sink: "$sink"');
+              } catch (e) {
+                debugPrint('[WebRtcAudioSink] setSinkId earpiece error: $e');
+              }
             }
-          } catch (sinkErr) {
-            debugPrint('[WebRtcAudioSink] setSinkId notice: $sinkErr');
+          } else {
+            // Loudspeaker target
+            final dynamic dynElem = elem;
+            if (dynElem.setSinkId != null) {
+              try {
+                final sink = targetDeviceId ?? 'default';
+                await dynElem.setSinkId(sink.toJS);
+                debugPrint('[WebRtcAudioSink] Applied speakerphone sink: "$sink"');
+              } catch (e) {
+                debugPrint('[WebRtcAudioSink] setSinkId speaker error: $e');
+              }
+            }
           }
         }
       } catch (e) {
