@@ -1723,7 +1723,7 @@ class ApiService {
         }),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
       return null;
     } catch (e) {
@@ -1738,7 +1738,7 @@ class ApiService {
         Uri.parse('$baseUrl/calls/email/meeting/$meetingId'),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
       return null;
     } catch (e) {
@@ -1758,7 +1758,7 @@ class ApiService {
         body: jsonEncode({'guest_name': guestName}),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
       return null;
     } catch (e) {
@@ -1805,7 +1805,7 @@ class ApiService {
         headers: _authHeaders(json: true),
         body: jsonEncode({'email': email}),
       );
-      return jsonDecode(response.body) as Map<String, dynamic>?;
+      return Map<String, dynamic>.from(jsonDecode(response.body));
     } catch (e) {
       debugPrint('API Error (sendProfileEmailOtp): $e');
       return {'error': e.toString()};
@@ -1819,7 +1819,7 @@ class ApiService {
         headers: _authHeaders(json: true),
         body: jsonEncode({'email': email, 'otp': otp}),
       );
-      return jsonDecode(response.body) as Map<String, dynamic>?;
+      return Map<String, dynamic>.from(jsonDecode(response.body));
     } catch (e) {
       debugPrint('API Error (verifyProfileEmailOtp): $e');
       return {'error': e.toString()};
@@ -1834,7 +1834,7 @@ class ApiService {
         body: jsonEncode({'target': target}),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
       return null;
     } catch (e) {
@@ -1900,7 +1900,7 @@ class ApiService {
         }),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
     } catch (e) {
       debugPrint('API Error (sendContactRequest): $e');
@@ -1953,7 +1953,7 @@ class ApiService {
         return {
           'emails': emails,
           'unread_count': data['unread_count'] ?? 0,
-          'counts': data['counts'] ?? {},
+          'counts': data['counts'] != null ? Map<String, dynamic>.from(data['counts']) : <String, dynamic>{},
         };
       }
     } catch (e) {
@@ -1969,7 +1969,7 @@ class ApiService {
         headers: _authHeaders(),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
     } catch (e) {
       debugPrint('API Error (getEmailDetail): $e');
@@ -2037,7 +2037,7 @@ class ApiService {
         body: jsonEncode({'email_id': emailId}),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
     } catch (e) {
       debugPrint('API Error (convertEmailToChat): $e');
@@ -2063,7 +2063,7 @@ class ApiService {
         }),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       }
     } catch (e) {
       debugPrint('API Error (forwardChatToEmail): $e');
@@ -2095,7 +2095,7 @@ class ApiService {
         }),
       );
       if (response.statusCode == 200 || response.statusCode == 201) {
-        return jsonDecode(response.body) as Map<String, dynamic>?;
+        return Map<String, dynamic>.from(jsonDecode(response.body));
       } else {
         final err = jsonDecode(response.body);
         ErrorHandler.showError(err['error'] ?? 'Failed to create account');

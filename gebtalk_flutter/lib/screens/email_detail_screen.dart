@@ -50,7 +50,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen> {
     setState(() => _isConverting = false);
 
     if (mounted && res != null && res['success'] == true) {
-      final contactMap = res['contact'] as Map<String, dynamic>?;
+      final contactMap = res['contact'] != null ? Map<String, dynamic>.from(res['contact'] as Map) : null;
       if (contactMap != null) {
         final contact = Contact.fromJson(contactMap);
         appState.selectContact(contact.id);

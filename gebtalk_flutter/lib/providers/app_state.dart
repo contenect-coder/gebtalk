@@ -1431,7 +1431,7 @@ class AppState extends ChangeNotifier {
         _emails = [];
       }
       _unreadEmailCount = res['unread_count'] is int ? res['unread_count'] : 0;
-      final rawCounts = res['counts'] as Map<String, dynamic>? ?? {};
+      final rawCounts = res['counts'] != null ? Map<String, dynamic>.from(res['counts'] as Map) : <String, dynamic>{};
       _emailFolderCounts = rawCounts.map((k, v) => MapEntry(k, v is int ? v : int.tryParse(v.toString()) ?? 0));
     } catch (e) {
       debugPrint('Error in fetchEmails: $e');
