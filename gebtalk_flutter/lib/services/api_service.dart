@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_models.dart';
 import '../models/email_models.dart';
 import '../utils/error_handler.dart';
@@ -9,7 +10,18 @@ import '../utils/error_handler.dart';
 class ApiService {
   static String? authenticatedPhone;
 
+  static const String defaultFallbackUrl = 'https://phpbb-intranet-savannah-phys.trycloudflare.com/api';
   static String? _customBaseUrl;
+
+  static Future<void> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('saved_custom_base_url');
+      if (saved != null && saved.isNotEmpty) {
+        _customBaseUrl = saved;
+      }
+    } catch (_) {}
+  }
 
   static void logDebug(String message) {
     try {
@@ -42,6 +54,11 @@ class ApiService {
 
   static set baseUrl(String value) {
     _customBaseUrl = value;
+    try {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('saved_custom_base_url', value);
+      });
+    } catch (_) {}
   }
 
   static Map<String, String> _authHeaders({bool json = false}) {
@@ -256,12 +273,34 @@ class ApiService {
       final uri = Uri.parse('$baseUrl/init').replace(
         queryParameters: phone != null ? {'phone': phone} : null,
       );
-      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 20));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
+      if (response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
+        final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
+          queryParameters: phone != null ? {'phone': phone} : null,
+        );
+        final fallbackRes = await http.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
+        if (fallbackRes.statusCode == 200) {
+          baseUrl = defaultFallbackUrl;
+          return jsonDecode(fallbackRes.body);
+        }
+      }
     } catch (e) {
       debugPrint('API Error (getInitData): $e');
+      if (baseUrl != defaultFallbackUrl) {
+        try {
+          final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
+            queryParameters: phone != null ? {'phone': phone} : null,
+          );
+          final fallbackRes = await http.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
+          if (fallbackRes.statusCode == 200) {
+            baseUrl = defaultFallbackUrl;
+            return jsonDecode(fallbackRes.body);
+          }
+        } catch (_) {}
+      }
     }
     return null;
   }
@@ -321,8 +360,26 @@ class ApiService {
         List data = jsonDecode(response.body);
         return data.map((item) => Contact.fromJson(item)).toList();
       }
+      if (response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
+        final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
+        if (fallbackRes.statusCode == 200) {
+          baseUrl = defaultFallbackUrl;
+          List data = jsonDecode(fallbackRes.body);
+          return data.map((item) => Contact.fromJson(item)).toList();
+        }
+      }
     } catch (e) {
       debugPrint('API Error (getContacts): $e');
+      if (baseUrl != defaultFallbackUrl) {
+        try {
+          final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
+          if (fallbackRes.statusCode == 200) {
+            baseUrl = defaultFallbackUrl;
+            List data = jsonDecode(fallbackRes.body);
+            return data.map((item) => Contact.fromJson(item)).toList();
+          }
+        } catch (_) {}
+      }
     }
     return [];
   }

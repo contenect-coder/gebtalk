@@ -13,8 +13,9 @@ import 'widgets/call_overlay.dart';
 import 'utils/call_audio_tone_player.dart';
 import 'dart:ui';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ApiService.init();
   CallAudioTonePlayer.unlockAudio();
   FlutterError.onError = (FlutterErrorDetails details) {
     debugPrint('FLUTTER ERROR DETECTED: ${details.exception}');
