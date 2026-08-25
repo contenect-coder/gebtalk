@@ -38,8 +38,8 @@ class ApiService {
     if (kIsWeb) {
       final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
       if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
-        // Production web deployment (Netlify /api proxy)
-        return '${Uri.base.origin}/api';
+        // Production web deployment: route directly to active cloud tunnel
+        return defaultFallbackUrl;
       }
       return 'http://$host:5000/api';
     } else {
@@ -215,7 +215,28 @@ class ApiService {
           'username': identifier.trim(),
           'password': password,
         }),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode >= 500 && baseUrl != defaultFallbackUrl) {
+        final fallbackRes = await http.post(
+          Uri.parse('$defaultFallbackUrl/auth/login-email'),
+          headers: _authHeaders(json: true),
+          body: jsonEncode({
+            'identifier': identifier.trim(),
+            'email': identifier.trim(),
+            'username': identifier.trim(),
+            'password': password,
+          }),
+        ).timeout(const Duration(seconds: 15));
+        final fallbackData = _parseJsonResponse(fallbackRes, defaultErrorMessage: 'Invalid username/email or password');
+        if (fallbackData != null && fallbackData is Map<String, dynamic>) {
+          baseUrl = defaultFallbackUrl;
+          if (fallbackData['token'] != null) {
+            authenticatedPhone = fallbackData['token'];
+          }
+          return fallbackData;
+        }
+      }
 
       final data = _parseJsonResponse(response, defaultErrorMessage: 'Invalid username/email or password');
       if (data != null && data is Map<String, dynamic>) {
@@ -226,6 +247,28 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('API Error: $e');
+      if (baseUrl != defaultFallbackUrl) {
+        try {
+          final fallbackRes = await http.post(
+            Uri.parse('$defaultFallbackUrl/auth/login-email'),
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'identifier': identifier.trim(),
+              'email': identifier.trim(),
+              'username': identifier.trim(),
+              'password': password,
+            }),
+          ).timeout(const Duration(seconds: 15));
+          final fallbackData = _parseJsonResponse(fallbackRes, defaultErrorMessage: 'Invalid username/email or password');
+          if (fallbackData != null && fallbackData is Map<String, dynamic>) {
+            baseUrl = defaultFallbackUrl;
+            if (fallbackData['token'] != null) {
+              authenticatedPhone = fallbackData['token'];
+            }
+            return fallbackData;
+          }
+        } catch (_) {}
+      }
       lastAuthError = 'NETWORK_ERROR';
       ErrorHandler.showError('Network Error: Unable to reach backend server.');
     }
