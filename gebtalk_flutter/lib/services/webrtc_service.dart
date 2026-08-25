@@ -882,6 +882,7 @@ class WebRtcService extends ChangeNotifier {
     isSpeakerOn = !isSpeakerOn;
     if (!kIsWeb) {
       Helper.setSpeakerphoneOn(isSpeakerOn);
+      WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
     } else {
       WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
     }

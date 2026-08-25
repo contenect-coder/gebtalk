@@ -1,6 +1,9 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 class WebRtcAudioSinkImpl {
+  static const _channel = MethodChannel('gebtalk/audio_control');
+
   static void attachRemoteAudio(MediaStream stream) {
     // Native mobile handles audio through OS audio framework
   }
@@ -10,7 +13,9 @@ class WebRtcAudioSinkImpl {
   }
 
   static void detachRemoteAudio() {
-    // Native mobile cleanup
+    try {
+      _channel.invokeMethod('resetAudioMode');
+    } catch (_) {}
   }
 
   static void unlockAudio() {
@@ -18,6 +23,8 @@ class WebRtcAudioSinkImpl {
   }
 
   static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
-    // Handled natively via Helper.setSpeakerphoneOn
+    try {
+      await _channel.invokeMethod('setSpeakerphoneOn', {'isSpeaker': isSpeaker});
+    } catch (_) {}
   }
 }

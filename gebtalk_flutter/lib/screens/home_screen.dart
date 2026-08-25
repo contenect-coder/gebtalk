@@ -62,8 +62,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (!mounted) return;
     final appState = Provider.of<AppState>(context, listen: false);
     final webrtcService = Provider.of<WebRtcService>(context, listen: false);
-    ApiService.logDebug('HomeScreen: _onAppStateChanged. profile=${appState.currentProfile?.name}, webrtcUser=${webrtcService.currentUserId}');
-    if (webrtcService.currentUserId == null && appState.currentProfile != null) {
+    if (appState.currentProfile != null && webrtcService.currentUserId != appState.currentProfile!.id) {
       webrtcService.initialize(appState.currentProfile!.id);
     }
   }
