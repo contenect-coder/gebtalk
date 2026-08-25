@@ -16,6 +16,10 @@ class WebRtcAudioSink {
     WebRtcAudioSinkImpl.detachRemoteAudio();
   }
 
+  static void unlockAudio() {
+    WebRtcAudioSinkImpl.unlockAudio();
+  }
+
   static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
     await WebRtcAudioSinkImpl.setSpeakerphoneOn(isSpeaker);
   }

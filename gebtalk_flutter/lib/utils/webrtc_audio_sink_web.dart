@@ -99,6 +99,16 @@ class WebRtcAudioSinkImpl {
     } catch (_) {}
   }
 
+  static void unlockAudio() {
+    if (!kIsWeb) return;
+    try {
+      final elem = _ensureElement();
+      elem.muted = false;
+      elem.volume = 1.0;
+      elem.play().toDart.catchError((_) => null);
+    } catch (_) {}
+  }
+
   static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
     if (!kIsWeb) return;
     _currentSpeakerState = isSpeaker;

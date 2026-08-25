@@ -13,6 +13,10 @@ class WebRtcAudioSinkImpl {
     // Native mobile cleanup
   }
 
+  static void unlockAudio() {
+    // Native mobile handles audio session
+  }
+
   static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
     // Handled natively via Helper.setSpeakerphoneOn
   }

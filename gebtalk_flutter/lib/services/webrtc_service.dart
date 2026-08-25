@@ -435,7 +435,7 @@ class WebRtcService extends ChangeNotifier {
       _peerConnection!.onAddStream = (stream) {
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
-        remoteRenderer.muted = true; // Mute internal renderer audio so only WebRtcAudioSink handles voice output
+        remoteRenderer.muted = false;
         WebRtcAudioSink.attachRemoteAudio(stream);
         WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
         if (!kIsWeb) {
@@ -454,7 +454,7 @@ class WebRtcService extends ChangeNotifier {
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
-          remoteRenderer.muted = true;
+          remoteRenderer.muted = false;
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
           WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
           if (!kIsWeb) {
@@ -528,6 +528,7 @@ class WebRtcService extends ChangeNotifier {
     callState = 'calling';
     statusMessage = 'Calling...';
     errorMessage = null;
+    WebRtcAudioSink.unlockAudio();
     CallAudioTonePlayer.playOutgoingDialTone();
     notifyListeners();
 
@@ -612,6 +613,7 @@ class WebRtcService extends ChangeNotifier {
 
     callState = 'connecting';
     statusMessage = 'Connecting...';
+    WebRtcAudioSink.unlockAudio();
     notifyListeners();
 
     final setupSuccess = await _setupPeerConnection();
