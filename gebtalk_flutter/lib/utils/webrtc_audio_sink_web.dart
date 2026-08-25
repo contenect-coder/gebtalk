@@ -5,6 +5,9 @@ import 'package:web/web.dart' as web;
 
 class WebRtcAudioSinkImpl {
   static web.HTMLAudioElement? _remoteAudioElement;
+  static web.AudioContext? _sinkAudioContext;
+  static web.MediaStreamAudioSourceNode? _mediaSourceNode;
+  static web.GainNode? _gainNode;
 
   static web.HTMLAudioElement _ensureElement() {
     if (_remoteAudioElement == null) {
@@ -43,6 +46,9 @@ class WebRtcAudioSinkImpl {
               elem.volume = 1.0;
               elem.muted = false;
               elem.play().toDart.catchError((_) => null);
+              if (_sinkAudioContext != null && _sinkAudioContext!.state == 'suspended') {
+                _sinkAudioContext!.resume();
+              }
             } catch (_) {}
           }
           web.window.addEventListener('click', onGesture.toJS);
@@ -69,6 +75,29 @@ class WebRtcAudioSinkImpl {
           elem.srcObject = jsMediaStream;
           _ensurePlayback(elem);
           debugPrint('[WebRtcAudioSink] Bound remote stream to HTMLAudioElement');
+          
+          // Connect to Web Audio API graph for zero-latency direct speaker pipeline
+          try {
+            if (_sinkAudioContext == null || _sinkAudioContext!.state == 'closed') {
+              _sinkAudioContext = web.AudioContext();
+            }
+            if (_sinkAudioContext!.state == 'suspended') {
+              _sinkAudioContext!.resume();
+            }
+            try {
+              _mediaSourceNode?.disconnect();
+            } catch (_) {}
+            final dynamic dynAudioCtx = _sinkAudioContext;
+            _mediaSourceNode = dynAudioCtx.createMediaStreamSource(jsMediaStream) as web.MediaStreamAudioSourceNode?;
+            _gainNode = _sinkAudioContext!.createGain();
+            _gainNode!.gain.value = 1.0;
+            _mediaSourceNode?.connect(_gainNode!);
+            _gainNode?.connect(_sinkAudioContext!.destination);
+            debugPrint('[WebRtcAudioSink] Connected Web Audio stream source node');
+          } catch (we) {
+            debugPrint('[WebRtcAudioSink] Web Audio graph node note: $we');
+          }
+
           setSpeakerphoneOn(_currentSpeakerState);
         }
       } catch (e) {
@@ -105,6 +134,12 @@ class WebRtcAudioSinkImpl {
         _remoteAudioElement!.srcObject = null;
         _remoteAudioElement!.pause();
       }
+      try {
+        _mediaSourceNode?.disconnect();
+        _mediaSourceNode = null;
+        _gainNode?.disconnect();
+        _gainNode = null;
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -115,6 +150,9 @@ class WebRtcAudioSinkImpl {
       elem.muted = false;
       elem.volume = 1.0;
       elem.play().toDart.catchError((_) => null);
+      if (_sinkAudioContext != null && _sinkAudioContext!.state == 'suspended') {
+        _sinkAudioContext!.resume();
+      }
     } catch (_) {}
   }
 
