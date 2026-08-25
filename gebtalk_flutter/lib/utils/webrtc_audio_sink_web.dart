@@ -143,7 +143,7 @@ class WebRtcAudioSinkImpl {
             }
           }
           
-          final finalId = targetDeviceId ?? (isSpeaker ? '' : 'default');
+          final finalId = targetDeviceId ?? (isSpeaker ? 'default' : '');
           
           try {
             final dynamic dynElem = elem;

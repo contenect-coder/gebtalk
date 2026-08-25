@@ -185,6 +185,15 @@ class CallAudioTonePlayerImpl {
         osc.start(st);
         osc.stop(st + dur);
       }
+
+      // Suspend Web Audio context once connected chime finishes playing (allowing VoIP communications mode to take priority)
+      Future.delayed(const Duration(milliseconds: 750), () {
+        if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
+          try {
+            _audioContext!.suspend();
+          } catch (_) {}
+        }
+      });
     } catch (e) {
       debugPrint('[TonePlayer] Error playing connected chime: $e');
     }
@@ -225,6 +234,14 @@ class CallAudioTonePlayerImpl {
         osc.start(st);
         osc.stop(st + dur);
       }
+
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
+          try {
+            _audioContext!.suspend();
+          } catch (_) {}
+        }
+      });
     } catch (e) {
       debugPrint('[TonePlayer] Error playing ended tone: $e');
     }
@@ -235,5 +252,10 @@ class CallAudioTonePlayerImpl {
     _isPlayingLoop = false;
     _loopTimer?.cancel();
     _loopTimer = null;
+    try {
+      if (_audioContext != null && _audioContext!.state == 'running') {
+        _audioContext!.suspend();
+      }
+    } catch (_) {}
   }
 }

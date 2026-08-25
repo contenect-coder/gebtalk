@@ -40,23 +40,6 @@ class CallOverlay extends StatelessWidget {
         color: Colors.transparent,
         child: Stack(
           children: [
-            // Live WebRTC audio sink binding to ensure browser speaker output
-            if (webrtcService.remoteStream != null)
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Opacity(
-                  opacity: 0.001,
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: RTCVideoView(
-                      webrtcService.remoteRenderer,
-                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    ),
-                  ),
-                ),
-              ),
             Positioned.fill(
               child: ClipRRect(
                 child: BackdropFilter(
