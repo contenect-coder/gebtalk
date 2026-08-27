@@ -6,13 +6,27 @@ import { OutgoingCall } from './components/OutgoingCall.js';
 import { IncomingCall } from './components/IncomingCall.js';
 import { ActiveCall } from './components/ActiveCall.js';
 import { ErrorBanner } from './components/ErrorBanner.js';
-import { Phone, Shield, Wifi, UserCheck, RefreshCw } from 'lucide-react';
+import { Phone, Shield, Wifi, UserCheck, RefreshCw, Settings, X, Check } from 'lucide-react';
 
-const DEFAULT_SERVER_URL =
-  (import.meta as any).env?.VITE_WS_SERVER_URL ||
-  `ws://${window.location.hostname || 'localhost'}:8080`;
+const getInitialServerUrl = (): string => {
+  const saved = localStorage.getItem('webrtc_calling_server_url');
+  if (saved) return saved;
+
+  const envUrl = (import.meta as any).env?.VITE_WS_SERVER_URL;
+  if (envUrl) return envUrl;
+
+  const host = window.location.hostname || 'localhost';
+  if (window.location.protocol === 'https:') {
+    return `wss://${host}:8080`;
+  }
+  return `ws://${host}:8080`;
+};
 
 export const App: React.FC = () => {
+  const [serverUrl, setServerUrl] = useState<string>(getInitialServerUrl);
+  const [isEditingServer, setIsEditingServer] = useState<boolean>(false);
+  const [tempServerUrl, setTempServerUrl] = useState<string>(serverUrl);
+
   // Read User ID from query param or localStorage or generate random
   const [userId, setUserId] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -50,7 +64,7 @@ export const App: React.FC = () => {
     toggleMute,
     clearError,
   } = useWebRTCCall({
-    serverUrl: DEFAULT_SERVER_URL,
+    serverUrl,
     userId,
     displayName,
   });
@@ -65,6 +79,16 @@ export const App: React.FC = () => {
       localStorage.setItem('webrtc_calling_user_id', cleanId);
       localStorage.setItem('webrtc_calling_display_name', cleanName);
       setIsEditingProfile(false);
+    }
+  };
+
+  const handleSaveServerUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUrl = tempServerUrl.trim();
+    if (cleanUrl) {
+      setServerUrl(cleanUrl);
+      localStorage.setItem('webrtc_calling_server_url', cleanUrl);
+      setIsEditingServer(false);
     }
   };
 
@@ -99,13 +123,73 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="navbar-status">
+        <div className="navbar-status flex items-center gap-2">
           <div className={`status-pill ${isConnected ? 'status-online' : 'status-offline'}`}>
             <Wifi size={14} className={isConnected ? 'icon-pulse' : ''} />
             <span>{isConnected ? 'Signaling Online' : 'Connecting...'}</span>
           </div>
+
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => setIsEditingServer(true)}
+            title="Configure Signaling Server URL"
+          >
+            <Settings size={14} />
+            <span>Server</span>
+          </button>
         </div>
       </header>
+
+      {/* Server URL Settings Modal */}
+      {isEditingServer && (
+        <div className="call-modal-overlay">
+          <div className="call-modal-card" style={{ maxWidth: '480px', textAlign: 'left' }}>
+            <div className="flex justify-between items-center mb-3">
+              <div className="flex items-center gap-2">
+                <Settings size={18} className="text-primary" />
+                <h3 style={{ color: '#fff', fontSize: '1.1rem' }}>Signaling Server Connection</h3>
+              </div>
+              <button
+                className="error-dismiss-btn"
+                onClick={() => setIsEditingServer(false)}
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-muted text-xs mb-3">
+              Configure the WebSocket signaling endpoint used for real-time peer discovery and WebRTC session negotiation.
+            </p>
+
+            <form onSubmit={handleSaveServerUrl}>
+              <label className="form-label">WebSocket Server URL</label>
+              <input
+                type="text"
+                className="input-text mono mb-3"
+                value={tempServerUrl}
+                onChange={(e) => setTempServerUrl(e.target.value)}
+                placeholder="ws://localhost:8080 or wss://..."
+                required
+              />
+
+              <div className="flex gap-2 justify-end mt-3">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setIsEditingServer(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-sm">
+                  <Check size={14} />
+                  <span>Save & Reconnect</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="main-content">
@@ -157,10 +241,16 @@ export const App: React.FC = () => {
                 Bob
               </button>
               <button
-                className={`btn-tag ${userId === 'john123' ? 'active' : ''}`}
-                onClick={() => handleSwitchToDemoUser('John123')}
+                className={`btn-tag ${userId === 'frank' ? 'active' : ''}`}
+                onClick={() => handleSwitchToDemoUser('Frank')}
               >
-                John123
+                Frank (Staff)
+              </button>
+              <button
+                className={`btn-tag ${userId === 'test01' ? 'active' : ''}`}
+                onClick={() => handleSwitchToDemoUser('Test01')}
+              >
+                Test01 (Customer)
               </button>
               <button
                 className={`btn-tag ${userId === 'ernest_ceo' ? 'active' : ''}`}

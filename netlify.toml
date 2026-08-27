@@ -1,12 +1,6 @@
 [build]
   command = "bash build.sh"
-  publish = "gebtalk_flutter/build/web"
-
-[[redirects]]
-  from = "/api/*"
-  to = "https://anniversary-mini-virgin-amongst.trycloudflare.com/api/:splat"
-  status = 200
-  force = true
+  publish = "webrtc_calling/frontend/dist"
 
 [[redirects]]
   from = "/*"
@@ -19,18 +13,3 @@
     X-Frame-Options = "SAMEORIGIN"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-
-[[headers]]
-  for = "/assets/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/flutter_bootstrap.js"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/main.dart.js"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
