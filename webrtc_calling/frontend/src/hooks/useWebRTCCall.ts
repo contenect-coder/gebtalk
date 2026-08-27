@@ -20,6 +20,18 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [connectionQuality, setConnectionQuality] = useState<string>('idle');
 
+  // Keep references to state values to avoid breaking useEffect connections during state transitions
+  const callStateRef = useRef<CallState>('IDLE');
+  const activeCallRef = useRef<CallSessionInfo | null>(null);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
+
   const signalingRef = useRef<SignalingClient | null>(null);
   const webrtcRef = useRef<WebRTCCallManager | null>(null);
   const notificationRef = useRef<MockPushNotificationService>(new MockPushNotificationService());
@@ -33,6 +45,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
     setCallState((current) => {
       if (isValidTransition(current, nextState)) {
         console.log(`[CallState] Transition: ${current} -> ${nextState}`);
+        callStateRef.current = nextState;
         return nextState;
       }
       console.warn(`[CallState] Invalid transition ignored: ${current} -> ${nextState}`);
@@ -54,8 +67,8 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       pendingOfferRef.current = null;
       setConnectionQuality('idle');
 
-      if (activeCall?.callId) {
-        notificationRef.current.cancelNotification(activeCall.callId);
+      if (activeCallRef.current?.callId) {
+        notificationRef.current.cancelNotification(activeCallRef.current.callId);
       }
 
       if (reason) {
@@ -64,20 +77,21 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
 
       safeSetCallState('IDLE');
       setActiveCall(null);
+      activeCallRef.current = null;
     },
-    [activeCall, clearAllTimers, safeSetCallState]
+    [clearAllTimers, safeSetCallState]
   );
 
   // Initialize WebRTC Call Manager
   useEffect(() => {
     webrtcRef.current = new WebRTCCallManager({
       onIceCandidate: (candidate) => {
-        if (activeCall && signalingRef.current) {
+        if (activeCallRef.current && signalingRef.current) {
           signalingRef.current.send({
             type: 'ice-candidate',
             from: userId,
-            to: activeCall.peerId,
-            callId: activeCall.callId,
+            to: activeCallRef.current.peerId,
+            callId: activeCallRef.current.callId,
             candidate,
           });
         }
@@ -112,9 +126,9 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
     return () => {
       webrtcRef.current?.cleanup();
     };
-  }, [userId, activeCall, safeSetCallState, resetCallState]);
+  }, [userId, safeSetCallState, resetCallState]);
 
-  // Connect Signaling Client
+  // Connect Signaling Client with decoupled state subscriptions
   useEffect(() => {
     if (!userId || !serverUrl) return;
 
@@ -123,7 +137,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
 
     signaling.connect(userId, displayName, (connected) => {
       setIsConnected(connected);
-      if (!connected && callState !== 'IDLE') {
+      if (!connected && callStateRef.current !== 'IDLE') {
         setErrorMessage('Signaling connection lost');
         resetCallState('Signaling dropped');
       }
@@ -148,22 +162,24 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       }
     });
 
-    const unregCallRequest = signaling.on('call-request', (msg: SignalingMessage) => {
+    const unregCallRequest = (msg: SignalingMessage) => {
       if (!msg.from || !msg.callId) return;
 
       const callerId = msg.from;
       const callerName = msg.callerName || callerId;
       const callId = msg.callId;
 
-      setActiveCall({
+      const newSession: CallSessionInfo = {
         callId,
         peerId: callerId,
         peerName: callerName,
         isCaller: false,
         state: 'RINGING',
         durationSeconds: 0,
-      });
+      };
 
+      activeCallRef.current = newSession;
+      setActiveCall(newSession);
       safeSetCallState('RINGING');
 
       // Send ringing acknowledgement back
@@ -185,16 +201,28 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       // Auto-timeout if not answered in 30s
       if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
       ringTimeoutRef.current = window.setTimeout(() => {
-        declineCall('No answer / Call timed out');
+        if (activeCallRef.current) {
+          signaling.send({
+            type: 'call-declined',
+            from: userId,
+            to: activeCallRef.current.peerId,
+            callId: activeCallRef.current.callId,
+            reason: 'No answer / Call timed out',
+          });
+          safeSetCallState('DECLINED');
+          setTimeout(() => resetCallState('Timeout'), 1000);
+        }
       }, CALL_CONFIG.RING_TIMEOUT_MS);
-    });
+    };
+    const unregReq = signaling.on('call-request', unregCallRequest);
 
     const unregCallRinging = signaling.on('call-ringing', () => {
       safeSetCallState('CALLING');
     });
 
     const unregCallAccepted = signaling.on('call-accepted', async (msg: SignalingMessage) => {
-      if (!activeCall || msg.callId !== activeCall.callId) return;
+      const currentActive = activeCallRef.current;
+      if (!currentActive || msg.callId !== currentActive.callId) return;
 
       if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
       safeSetCallState('CONNECTING');
@@ -205,14 +233,24 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
           signaling.send({
             type: 'offer',
             from: userId,
-            to: activeCall.peerId,
-            callId: activeCall.callId,
+            to: currentActive.peerId,
+            callId: currentActive.callId,
             sdp: offer.sdp,
           });
         }
       } catch (err: any) {
         setErrorMessage(`Failed to create WebRTC offer: ${err.message}`);
-        hangUp();
+        if (currentActive) {
+          signaling.send({
+            type: 'call-ended',
+            from: userId,
+            to: currentActive.peerId,
+            callId: currentActive.callId,
+            reason: 'Offer failure',
+          });
+        }
+        safeSetCallState('ENDING');
+        setTimeout(() => resetCallState('Offer failed'), 500);
       }
     });
 
@@ -220,7 +258,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       if (!msg.sdp || !msg.callId) return;
       pendingOfferRef.current = msg.sdp;
 
-      if (callState === 'CONNECTING') {
+      if (callStateRef.current === 'CONNECTING') {
         try {
           const answer = await webrtcRef.current?.handleRemoteOffer(msg.sdp);
           if (answer && answer.sdp) {
@@ -234,7 +272,17 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
           }
         } catch (err: any) {
           setErrorMessage(`Failed to handle SDP offer: ${err.message}`);
-          hangUp();
+          if (activeCallRef.current) {
+            signaling.send({
+              type: 'call-ended',
+              from: userId,
+              to: activeCallRef.current.peerId,
+              callId: activeCallRef.current.callId,
+              reason: 'Answer error',
+            });
+          }
+          safeSetCallState('ENDING');
+          setTimeout(() => resetCallState('Answer failed'), 500);
         }
       }
     });
@@ -274,7 +322,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
 
     const unregError = signaling.on('error', (msg: SignalingMessage) => {
       setErrorMessage(msg.message || 'Call error occurred');
-      if (callState !== 'IDLE') {
+      if (callStateRef.current !== 'IDLE') {
         safeSetCallState('FAILED');
         setTimeout(() => resetCallState(msg.message), CALL_CONFIG.DISMISS_AUTO_MS);
       }
@@ -284,7 +332,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       unregRegistered();
       unregUserOnline();
       unregUserOffline();
-      unregCallRequest();
+      unregReq();
       unregCallRinging();
       unregCallAccepted();
       unregOffer();
@@ -296,7 +344,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       unregError();
       signaling.disconnect();
     };
-  }, [userId, displayName, serverUrl, callState, activeCall, safeSetCallState, resetCallState]);
+  }, [userId, displayName, serverUrl, safeSetCallState, resetCallState]);
 
   // Start outgoing call
   const startCall = useCallback(
@@ -306,7 +354,7 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
         return;
       }
 
-      if (callState !== 'IDLE') {
+      if (callStateRef.current !== 'IDLE') {
         setErrorMessage('Another call is already in progress');
         return;
       }
@@ -322,15 +370,17 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       const callId = `CALL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const peerName = targetUserName || targetUserId;
 
-      setActiveCall({
+      const newSession: CallSessionInfo = {
         callId,
         peerId: targetUserId,
         peerName,
         isCaller: true,
         state: 'CALLING',
         durationSeconds: 0,
-      });
+      };
 
+      activeCallRef.current = newSession;
+      setActiveCall(newSession);
       safeSetCallState('CALLING');
 
       signalingRef.current?.send({
@@ -344,18 +394,29 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       // Outgoing call timeout (30 seconds)
       if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
       ringTimeoutRef.current = window.setTimeout(() => {
-        hangUp('No answer from user');
+        if (activeCallRef.current) {
+          signalingRef.current?.send({
+            type: 'call-ended',
+            from: userId,
+            to: activeCallRef.current.peerId,
+            callId: activeCallRef.current.callId,
+            reason: 'No answer from user',
+          });
+          safeSetCallState('ENDING');
+          setTimeout(() => resetCallState('No answer'), 500);
+        }
       }, CALL_CONFIG.RING_TIMEOUT_MS);
     },
-    [userId, displayName, callState, safeSetCallState]
+    [userId, displayName, safeSetCallState, resetCallState]
   );
 
   // Answer incoming call
   const answerCall = useCallback(async () => {
-    if (!activeCall || callState !== 'RINGING') return;
+    const current = activeCallRef.current;
+    if (!current || callStateRef.current !== 'RINGING') return;
 
     if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
-    notificationRef.current.cancelNotification(activeCall.callId);
+    notificationRef.current.cancelNotification(current.callId);
 
     safeSetCallState('CONNECTING');
 
@@ -365,8 +426,8 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       signalingRef.current?.send({
         type: 'call-accepted',
         from: userId,
-        to: activeCall.peerId,
-        callId: activeCall.callId,
+        to: current.peerId,
+        callId: current.callId,
       });
 
       if (pendingOfferRef.current) {
@@ -375,41 +436,53 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
           signalingRef.current?.send({
             type: 'answer',
             from: userId,
-            to: activeCall.peerId,
-            callId: activeCall.callId,
+            to: current.peerId,
+            callId: current.callId,
             sdp: answer.sdp,
           });
         }
       }
     } catch (err: any) {
       setErrorMessage(`Failed to answer: ${err.message}`);
-      declineCall('Microphone error');
+      if (current) {
+        signalingRef.current?.send({
+          type: 'call-declined',
+          from: userId,
+          to: current.peerId,
+          callId: current.callId,
+          reason: 'Microphone error',
+        });
+        safeSetCallState('DECLINED');
+        setTimeout(() => resetCallState('Mic error'), 1000);
+      }
     }
-  }, [activeCall, callState, userId, safeSetCallState]);
+  }, [userId, safeSetCallState, resetCallState]);
 
   // Decline incoming call
   const declineCall = useCallback(
     (reason?: string) => {
-      if (!activeCall) return;
+      const current = activeCallRef.current;
+      if (!current) return;
 
       signalingRef.current?.send({
         type: 'call-declined',
         from: userId,
-        to: activeCall.peerId,
-        callId: activeCall.callId,
+        to: current.peerId,
+        callId: current.callId,
         reason: reason || 'Call declined',
       });
 
       safeSetCallState('DECLINED');
       setTimeout(() => resetCallState('Declined'), 1000);
     },
-    [activeCall, userId, safeSetCallState, resetCallState]
+    [userId, safeSetCallState, resetCallState]
   );
 
   // Hang up active call
   const hangUp = useCallback(
     (reason?: string) => {
-      if (!activeCall) {
+      const current = activeCallRef.current;
+      if (!current) {
         resetCallState('Hangup on empty call');
         return;
       }
@@ -417,15 +490,15 @@ export function useWebRTCCall({ serverUrl, userId, displayName }: UseWebRTCCallO
       signalingRef.current?.send({
         type: 'call-ended',
         from: userId,
-        to: activeCall.peerId,
-        callId: activeCall.callId,
+        to: current.peerId,
+        callId: current.callId,
         reason: reason || 'Call ended by user',
       });
 
       safeSetCallState('ENDING');
       setTimeout(() => resetCallState('Ended by user'), 500);
     },
-    [activeCall, userId, safeSetCallState, resetCallState]
+    [userId, safeSetCallState, resetCallState]
   );
 
   // Toggle Mute
