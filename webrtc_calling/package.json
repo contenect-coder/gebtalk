@@ -1,0 +1,25 @@
+{
+  "name": "gebtalk-webrtc-calling-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pure Internet WebRTC Audio Calling System",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend test",
+    "test": "tsx --test tests/backend/presence.test.ts tests/backend/signaling.test.ts tests/frontend/callState.test.ts tests/integration/callFlow.test.ts"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.10"
+  }
+}
