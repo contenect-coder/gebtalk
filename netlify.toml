@@ -1,5 +1,5 @@
 [build]
-  command = "bash build.sh"
+  command = "npm --prefix webrtc_calling/frontend install && npm --prefix webrtc_calling/frontend run build"
   publish = "webrtc_calling/frontend/dist"
 
 [[redirects]]
@@ -13,3 +13,4 @@
     X-Frame-Options = "SAMEORIGIN"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Cache-Control = "no-cache, no-store, must-revalidate"
