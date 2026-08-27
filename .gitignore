@@ -16,6 +16,9 @@ dist/
 .flutter-plugins
 .flutter-plugins-dependencies
 **/build/
+!gebtalk_flutter/build/
+!gebtalk_flutter/build/web/
+!gebtalk_flutter/build/web/**
 *.iml
 .metadata
 
