@@ -227,14 +227,18 @@ class WebRtcService extends ChangeNotifier {
                   track.enabled = !isMuted;
                 }
               }
+              if (_peerConnection != null) {
+                _peerConnection!.getSenders().then((senders) {
+                  for (var sender in senders) {
+                    if (sender.track != null && sender.track!.kind == 'audio') {
+                      sender.track!.enabled = !isMuted;
+                    }
+                  }
+                }).catchError((_) {});
+              }
 
               // Default to top earpiece receiver speaker
-              isSpeakerOn = false;
-              if (!kIsWeb) {
-                Helper.setSpeakerphoneOn(false);
-              } else {
-                WebRtcAudioSink.setSpeakerphoneOn(false);
-              }
+              await _applyAudioRouting(false);
               
               callState = 'connected';
               statusMessage = null;
@@ -319,16 +323,38 @@ class WebRtcService extends ChangeNotifier {
     }
   }
 
-  // Setup local media & RTCPeerConnection with graceful permission handling
-  Future<bool> _setupPeerConnection() async {
-    // Initialize audio mode to earpiece by default for voice calls
+  /// Unified Audio Routing: Applies routing across both flutter_webrtc helper and native Android AudioManager
+  Future<void> _applyAudioRouting(bool speakerOn) async {
+    isSpeakerOn = speakerOn;
     if (!kIsWeb) {
       try {
-        Helper.setSpeakerphoneOn(false);
+        await Helper.setSpeakerphoneOn(speakerOn);
       } catch (e) {
-        debugPrint('[WebRTC] Helper.setSpeakerphoneOn init error: $e');
+        debugPrint('[WebRTC] Helper.setSpeakerphoneOn error: $e');
       }
     }
+    try {
+      await WebRtcAudioSink.setSpeakerphoneOn(speakerOn);
+    } catch (e) {
+      debugPrint('[WebRTC] WebRtcAudioSink.setSpeakerphoneOn error: $e');
+    }
+    notifyListeners();
+  }
+
+  // Setup local media & RTCPeerConnection with graceful permission handling
+  Future<bool> _setupPeerConnection() async {
+    // 1. Verify and request microphone runtime permission (vital for Android 14 / Samsung A06)
+    final hasMic = await WebRtcAudioSink.checkAndRequestMicrophonePermission();
+    if (!hasMic) {
+      debugPrint('[WebRTC] Microphone runtime permission denied');
+      errorMessage = 'Microphone permission required for voice calls.';
+      statusMessage = 'Microphone Permission Required';
+      _transitionToTerminalState('failed');
+      return false;
+    }
+
+    // 2. Initialize audio mode to top earpiece receiver by default for voice calls
+    await _applyAudioRouting(false);
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
@@ -336,7 +362,6 @@ class WebRtcService extends ChangeNotifier {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
-          'channelCount': 1,
         },
         'video': false,
       });
@@ -355,10 +380,10 @@ class WebRtcService extends ChangeNotifier {
 
     if (localStream != null) {
       for (var track in localStream!.getAudioTracks()) {
-        track.enabled = true;
+        track.enabled = !isMuted;
       }
       // Allow microphone hardware to settle
-      await Future.delayed(const Duration(milliseconds: 150));
+      await Future.delayed(const Duration(milliseconds: 120));
     }
     
     try {
@@ -393,23 +418,26 @@ class WebRtcService extends ChangeNotifier {
       };
 
       // Handle connection states
-      _peerConnection!.onIceConnectionState = (state) {
+      _peerConnection!.onIceConnectionState = (state) async {
         debugPrint('[WebRTC] ICE connection state: $state');
         if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
             state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+          CallAudioTonePlayer.stopAllTones();
           if (localStream != null) {
             for (var track in localStream!.getAudioTracks()) {
               track.enabled = !isMuted;
             }
           }
-          if (!kIsWeb) {
-            Helper.setSpeakerphoneOn(isSpeakerOn);
-            Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-            Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-            Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-          } else {
-            WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
+          if (_peerConnection != null) {
+            _peerConnection!.getSenders().then((senders) {
+              for (var sender in senders) {
+                if (sender.track != null && sender.track!.kind == 'audio') {
+                  sender.track!.enabled = !isMuted;
+                }
+              }
+            }).catchError((_) {});
           }
+          await _applyAudioRouting(isSpeakerOn);
           if (callState != 'connected') {
             callState = 'connected';
             statusMessage = null;
@@ -432,53 +460,35 @@ class WebRtcService extends ChangeNotifier {
       };
 
       // Handle remote tracks
-      _peerConnection!.onAddStream = (stream) {
+      _peerConnection!.onAddStream = (stream) async {
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
         remoteRenderer.muted = false;
         WebRtcAudioSink.attachRemoteAudio(stream);
-        WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
-        if (!kIsWeb) {
-          Helper.setSpeakerphoneOn(isSpeakerOn);
-          Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-          Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-          Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-        }
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
         }
+        await _applyAudioRouting(isSpeakerOn);
         notifyListeners();
       };
       
-      _peerConnection!.onTrack = (event) {
+      _peerConnection!.onTrack = (event) async {
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
           remoteRenderer.muted = false;
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
-          WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
-          if (!kIsWeb) {
-            Helper.setSpeakerphoneOn(isSpeakerOn);
-            Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-            Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-            Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-          }
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
           }
+          await _applyAudioRouting(isSpeakerOn);
           notifyListeners();
         } else {
           final track = event.track;
           if (track.kind == 'audio') {
             track.enabled = true;
             WebRtcAudioSink.attachRemoteTrack(track);
-            WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
-            if (!kIsWeb) {
-              Helper.setSpeakerphoneOn(isSpeakerOn);
-              Future.delayed(const Duration(milliseconds: 300), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-              Future.delayed(const Duration(milliseconds: 800), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-              Future.delayed(const Duration(milliseconds: 1500), () => Helper.setSpeakerphoneOn(isSpeakerOn));
-            }
+            await _applyAudioRouting(isSpeakerOn);
             notifyListeners();
           }
         }
@@ -530,6 +540,7 @@ class WebRtcService extends ChangeNotifier {
     errorMessage = null;
     WebRtcAudioSink.unlockAudio();
     CallAudioTonePlayer.playOutgoingDialTone();
+    await _applyAudioRouting(false);
     notifyListeners();
 
     // 35-second call timeout timer
@@ -611,9 +622,12 @@ class WebRtcService extends ChangeNotifier {
   Future<void> acceptCall() async {
     if (callState != 'ringing' || currentCallId == null) return;
 
+    // Immediately stop loud incoming ringtone so audio hardware switches cleanly to top earpiece receiver
+    CallAudioTonePlayer.stopAllTones();
     callState = 'connecting';
     statusMessage = 'Connecting...';
     WebRtcAudioSink.unlockAudio();
+    await _applyAudioRouting(false);
     notifyListeners();
 
     final setupSuccess = await _setupPeerConnection();
@@ -679,14 +693,18 @@ class WebRtcService extends ChangeNotifier {
             track.enabled = !isMuted;
           }
         }
+        if (_peerConnection != null) {
+          _peerConnection!.getSenders().then((senders) {
+            for (var sender in senders) {
+              if (sender.track != null && sender.track!.kind == 'audio') {
+                sender.track!.enabled = !isMuted;
+              }
+            }
+          }).catchError((_) {});
+        }
 
         // Default to top earpiece receiver speaker
-        isSpeakerOn = false;
-        if (!kIsWeb) {
-          Helper.setSpeakerphoneOn(false);
-        } else {
-          WebRtcAudioSink.setSpeakerphoneOn(false);
-        }
+        await _applyAudioRouting(false);
 
         callState = 'connected';
         statusMessage = null;
@@ -809,6 +827,12 @@ class WebRtcService extends ChangeNotifier {
     _lastFetchedCandidateId = 0;
 
     WebRtcAudioSink.detachRemoteAudio();
+    if (!kIsWeb) {
+      try {
+        Helper.setSpeakerphoneOn(false);
+      } catch (_) {}
+    }
+
     localStream?.getTracks().forEach((track) => track.stop());
     localStream?.dispose();
     localStream = null;
@@ -879,13 +903,6 @@ class WebRtcService extends ChangeNotifier {
   }
 
   void toggleSpeaker() {
-    isSpeakerOn = !isSpeakerOn;
-    if (!kIsWeb) {
-      Helper.setSpeakerphoneOn(isSpeakerOn);
-      WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
-    } else {
-      WebRtcAudioSink.setSpeakerphoneOn(isSpeakerOn);
-    }
-    notifyListeners();
+    _applyAudioRouting(!isSpeakerOn);
   }
 }

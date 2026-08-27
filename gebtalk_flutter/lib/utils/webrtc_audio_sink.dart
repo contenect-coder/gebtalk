@@ -4,6 +4,10 @@ import 'webrtc_audio_sink_stub.dart'
     if (dart.library.html) 'webrtc_audio_sink_web.dart';
 
 class WebRtcAudioSink {
+  static Future<bool> checkAndRequestMicrophonePermission() async {
+    return await WebRtcAudioSinkImpl.checkAndRequestMicrophonePermission();
+  }
+
   static void attachRemoteAudio(MediaStream stream) {
     WebRtcAudioSinkImpl.attachRemoteAudio(stream);
   }

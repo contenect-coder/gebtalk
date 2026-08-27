@@ -9,6 +9,10 @@ class WebRtcAudioSinkImpl {
   static web.MediaStreamAudioSourceNode? _mediaSourceNode;
   static web.GainNode? _gainNode;
 
+  static Future<bool> checkAndRequestMicrophonePermission() async {
+    return true; // Web browser prompts for permission during getUserMedia()
+  }
+
   static web.HTMLAudioElement _ensureElement() {
     if (_remoteAudioElement == null) {
       _remoteAudioElement = web.HTMLAudioElement();
@@ -164,16 +168,17 @@ class WebRtcAudioSinkImpl {
       try {
         final elem = _ensureElement();
         final nav = web.window.navigator;
-        if (nav.mediaDevices != null) {
+        try {
           final devices = await nav.mediaDevices.enumerateDevices().toDart;
-          final len = devices.length;
+          final dynamic dynDevices = devices;
+          final int len = dynDevices.length as int;
           String? targetDeviceId;
           
           for (int i = 0; i < len; i++) {
-            final d = devices[i];
+            final dynamic d = dynDevices[i];
             if (d.kind == 'audiooutput') {
-              final label = d.label.toLowerCase();
-              final deviceId = d.deviceId;
+              final label = (d.label as String? ?? '').toLowerCase();
+              final deviceId = d.deviceId as String? ?? '';
               if (!isSpeaker) {
                 // Earpiece / Top Speaker / Receiver / Communications target
                 if (label.contains('earpiece') ||
