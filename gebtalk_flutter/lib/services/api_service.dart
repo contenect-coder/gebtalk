@@ -10,7 +10,7 @@ import '../utils/error_handler.dart';
 class ApiService {
   static String? authenticatedPhone;
 
-  static const String defaultFallbackUrl = 'https://phpbb-intranet-savannah-phys.trycloudflare.com/api';
+  static const String defaultFallbackUrl = 'https://anniversary-mini-virgin-amongst.trycloudflare.com/api';
   static String? _customBaseUrl;
 
   static Future<void> init() async {
