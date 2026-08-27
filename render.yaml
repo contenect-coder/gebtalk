@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: gebtalk-backend
+    runtime: python
+    rootDir: gebtalk_backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SUPABASE_DB_URL
+        value: postgresql://postgres:company4me.comapp@db.pkzsorkvyyqxpvbqcpei.supabase.co:5432/postgres
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        value: frankvictorcls@gmail.com
+      - key: SMTP_PASS
+        value: cdzwvterrmililwr
+      - key: EMAIL_FROM
+        value: GEBTALK <frankvictorcls@gmail.com>
+      - key: TEXTBEE_API_KEY
+        value: 6ccb72f2-68bf-485f-8ebd-58203c3728d2
+      - key: TEXTBEE_DEVICE_ID
+        value: 6a33fc6477015dcde1195750
+      - key: FRONTEND_BASE_URL
+        value: https://gebtalk-app.netlify.app
