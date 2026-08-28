@@ -3,7 +3,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://lobby-ending-catch-like.trycloudflare.com/api/:splat"
+  to = "https://gebtalk-backend.onrender.com/api/:splat"
   status = 200
   force = true
 
