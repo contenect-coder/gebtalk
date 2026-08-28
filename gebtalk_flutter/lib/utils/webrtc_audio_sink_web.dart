@@ -168,66 +168,64 @@ class WebRtcAudioSinkImpl {
       try {
         final elem = _ensureElement();
         final nav = web.window.navigator;
-        try {
-          final devices = await nav.mediaDevices.enumerateDevices().toDart;
-          final dynamic dynDevices = devices;
-          final int len = dynDevices.length as int;
-          String? targetDeviceId;
-          
-          for (int i = 0; i < len; i++) {
-            final dynamic d = dynDevices[i];
-            if (d.kind == 'audiooutput') {
-              final label = (d.label as String? ?? '').toLowerCase();
-              final deviceId = d.deviceId as String? ?? '';
-              if (!isSpeaker) {
-                // Earpiece / Top Speaker / Receiver / Communications target
-                if (label.contains('earpiece') ||
-                    label.contains('receiver') ||
-                    label.contains('internal') ||
-                    label.contains('phone') ||
-                    label.contains('headset') ||
-                    label.contains('earphone') ||
-                    label.contains('communications') ||
-                    deviceId == 'communications') {
-                  targetDeviceId = deviceId;
-                  break;
-                }
-              } else {
-                // Loudspeaker / Bottom Speaker target
-                if (label.contains('speaker') ||
-                    label.contains('loudspeaker') ||
-                    label.contains('main') ||
-                    label.contains('external')) {
-                  targetDeviceId = deviceId;
-                  break;
-                }
+        final devices = await nav.mediaDevices.enumerateDevices().toDart;
+        final dynamic dynDevices = devices;
+        final int len = dynDevices.length as int;
+        String? targetDeviceId;
+        
+        for (int i = 0; i < len; i++) {
+          final dynamic d = dynDevices[i];
+          if (d.kind == 'audiooutput') {
+            final label = (d.label as String? ?? '').toLowerCase();
+            final deviceId = d.deviceId as String? ?? '';
+            if (!isSpeaker) {
+              // Earpiece / Top Speaker / Receiver / Communications target
+              if (label.contains('earpiece') ||
+                  label.contains('receiver') ||
+                  label.contains('internal') ||
+                  label.contains('phone') ||
+                  label.contains('headset') ||
+                  label.contains('earphone') ||
+                  label.contains('communications') ||
+                  deviceId == 'communications') {
+                targetDeviceId = deviceId;
+                break;
+              }
+            } else {
+              // Loudspeaker / Bottom Speaker target
+              if (label.contains('speaker') ||
+                  label.contains('loudspeaker') ||
+                  label.contains('main') ||
+                  label.contains('external')) {
+                targetDeviceId = deviceId;
+                break;
               }
             }
           }
-          
-          if (!isSpeaker) {
-            // Earpiece target
-            final dynamic dynElem = elem;
-            if (dynElem.setSinkId != null) {
-              try {
-                final sink = targetDeviceId ?? '';
-                await dynElem.setSinkId(sink.toJS);
-                debugPrint('[WebRtcAudioSink] Applied earpiece sink: "$sink"');
-              } catch (e) {
-                debugPrint('[WebRtcAudioSink] setSinkId earpiece error: $e');
-              }
+        }
+        
+        if (!isSpeaker) {
+          // Earpiece target
+          final dynamic dynElem = elem;
+          if (dynElem.setSinkId != null) {
+            try {
+              final sink = targetDeviceId ?? '';
+              await dynElem.setSinkId(sink.toJS);
+              debugPrint('[WebRtcAudioSink] Applied earpiece sink: "$sink"');
+            } catch (e) {
+              debugPrint('[WebRtcAudioSink] setSinkId earpiece error: $e');
             }
-          } else {
-            // Loudspeaker target
-            final dynamic dynElem = elem;
-            if (dynElem.setSinkId != null) {
-              try {
-                final sink = targetDeviceId ?? 'default';
-                await dynElem.setSinkId(sink.toJS);
-                debugPrint('[WebRtcAudioSink] Applied speakerphone sink: "$sink"');
-              } catch (e) {
-                debugPrint('[WebRtcAudioSink] setSinkId speaker error: $e');
-              }
+          }
+        } else {
+          // Loudspeaker target
+          final dynamic dynElem = elem;
+          if (dynElem.setSinkId != null) {
+            try {
+              final sink = targetDeviceId ?? 'default';
+              await dynElem.setSinkId(sink.toJS);
+              debugPrint('[WebRtcAudioSink] Applied speakerphone sink: "$sink"');
+            } catch (e) {
+              debugPrint('[WebRtcAudioSink] setSinkId speaker error: $e');
             }
           }
         }
