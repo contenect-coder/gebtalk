@@ -6,8 +6,15 @@ import 'package:provider/provider.dart';
 import '../services/webrtc_service.dart';
 import '../theme/colors.dart';
 
-class CallOverlay extends StatelessWidget {
+class CallOverlay extends StatefulWidget {
   const CallOverlay({super.key});
+
+  @override
+  State<CallOverlay> createState() => _CallOverlayState();
+}
+
+class _CallOverlayState extends State<CallOverlay> {
+  bool _showDiagnostics = false;
 
   String _formatDuration(int totalSeconds) {
     final int minutes = totalSeconds ~/ 60;
@@ -66,40 +73,80 @@ class CallOverlay extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                    // Top Security Badge
+                    // Top Security Badge & Diagnostics Toggle
                     Padding(
                       padding: const EdgeInsets.only(top: 36.0),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.glassWhite,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isConnected ? AppColors.primary.withValues(alpha: 0.4) : AppColors.glassBorder,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.lock_outline_rounded,
-                              color: isConnected ? AppColors.primary : AppColors.textMuted,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              isConnected ? 'HD VOICE • E2E ENCRYPTED' : 'INTERNET VOICE CALL',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.2,
-                                color: isConnected ? AppColors.primary : AppColors.textMuted,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            onTap: () => setState(() => _showDiagnostics = !_showDiagnostics),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppColors.glassWhite,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: isConnected ? AppColors.primary.withValues(alpha: 0.4) : AppColors.glassBorder,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.lock_outline_rounded,
+                                    color: isConnected ? AppColors.primary : AppColors.textMuted,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isConnected ? 'HD VOICE • E2E ENCRYPTED' : 'INTERNET VOICE CALL',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 1.2,
+                                      color: isConnected ? AppColors.primary : AppColors.textMuted,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    _showDiagnostics ? Icons.keyboard_arrow_up : Icons.info_outline,
+                                    color: _showDiagnostics ? AppColors.primary : AppColors.textMuted,
+                                    size: 14,
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ).animate().fadeIn(duration: 400.ms),
-                    ),
+                          ),
+                          if (_showDiagnostics)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 10.0, left: 24.0, right: 24.0),
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('─── CALL AUDIO DIAGNOSTICS ───', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                                    const SizedBox(height: 6),
+                                    _buildDiagRow('CALL STATE', state.toUpperCase()),
+                                    _buildDiagRow('LOCAL AUDIO TRACK', webrtcService.hasLocalAudioTrack ? 'FOUND (LIVE)' : 'NOT FOUND'),
+                                    _buildDiagRow('REMOTE AUDIO TRACK', webrtcService.hasRemoteAudioTrack ? 'FOUND (LIVE)' : 'WAITING'),
+                                    _buildDiagRow('ICE CONNECTION', webrtcService.lastIceConnectionState ?? 'UNKNOWN'),
+                                    _buildDiagRow('AUDIO OUTPUT', webrtcService.audioOutputMode ?? 'DEFAULT'),
+                                    _buildDiagRow('MICROPHONE', webrtcService.isMuted ? 'MUTED' : 'TRANSMITTING'),
+                                    _buildDiagRow('SPEAKERPHONE', webrtcService.isSpeakerOn ? 'ON' : 'OFF'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ).animate().fadeIn(duration: 400.ms),
 
                     // Middle Caller Info & Pulsing Avatar Section
                     Column(
@@ -592,6 +639,20 @@ class CallOverlay extends StatelessWidget {
               fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiagRow(String label, String value) {
+    final bool isGood = value.contains('FOUND') || value.contains('CONNECTED') || value.contains('LIVE') || value.contains('TRANSMITTING');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600)),
+          Text(value, style: TextStyle(color: isGood ? const Color(0xFF00E676) : (value.contains('NOT') || value.contains('FAILED') ? const Color(0xFFFF5252) : const Color(0xFFFFD700)), fontSize: 10, fontWeight: FontWeight.bold)),
         ],
       ),
     );

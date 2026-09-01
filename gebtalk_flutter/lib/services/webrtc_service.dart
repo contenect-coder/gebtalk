@@ -43,6 +43,11 @@ class WebRtcService extends ChangeNotifier {
   Timer? _autoDismissTimer;
   int _lastFetchedCandidateId = 0;
   String? _cachedOfferSdp;
+  String lastIceConnectionState = 'NEW';
+
+  bool get hasLocalAudioTrack => localStream != null && localStream!.getAudioTracks().isNotEmpty;
+  bool get hasRemoteAudioTrack => remoteStream != null && remoteStream!.getAudioTracks().isNotEmpty;
+  String get audioOutputMode => isSpeakerOn ? 'SPEAKER' : 'EARPIECE';
   
   Map<String, dynamic> _iceConfiguration = {
     'iceServers': [
@@ -442,7 +447,9 @@ class WebRtcService extends ChangeNotifier {
 
       // Handle connection states
       _peerConnection!.onIceConnectionState = (state) async {
-        debugPrint('[WebRTC][DIAG] ICE CONNECTION: $state');
+        final stateName = state.toString().split('.').last.replaceAll('RTCIceConnectionState', '').toUpperCase();
+        lastIceConnectionState = stateName;
+        debugPrint('[WebRTC][DIAG] ICE CONNECTION: $state ($stateName)');
         if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
             state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
           CallAudioTonePlayer.stopAllTones();
@@ -879,6 +886,7 @@ class WebRtcService extends ChangeNotifier {
     _pendingRemoteCandidates.clear();
     _isRemoteDescriptionSet = false;
     _lastFetchedCandidateId = 0;
+    lastIceConnectionState = 'NEW';
 
     WebRtcAudioSink.detachRemoteAudio();
     if (!kIsWeb) {
