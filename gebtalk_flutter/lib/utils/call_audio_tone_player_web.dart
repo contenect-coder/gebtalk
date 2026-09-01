@@ -188,14 +188,7 @@ class CallAudioTonePlayerImpl {
         osc.stop(st + dur);
       }
 
-      // Suspend Web Audio context once connected chime finishes playing
-      Future.delayed(const Duration(milliseconds: 900), () {
-        if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
-          try {
-            _audioContext!.suspend();
-          } catch (_) {}
-        }
-      });
+      // Chime is fire-and-forget; no need to suspend context (it would race with WebRTC audio)
     } catch (e) {
       debugPrint('[TonePlayer] Error playing connected chime: $e');
     }
@@ -237,13 +230,7 @@ class CallAudioTonePlayerImpl {
         osc.stop(st + dur);
       }
 
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (!_isPlayingLoop && _audioContext != null && _audioContext!.state == 'running') {
-          try {
-            _audioContext!.suspend();
-          } catch (_) {}
-        }
-      });
+      // Ended tone is fire-and-forget; no need to suspend context
     } catch (e) {
       debugPrint('[TonePlayer] Error playing ended tone: $e');
     }
@@ -254,10 +241,15 @@ class CallAudioTonePlayerImpl {
     _isPlayingLoop = false;
     _loopTimer?.cancel();
     _loopTimer = null;
+    // Close and discard the tone AudioContext so it doesn't interfere with
+    // WebRTC audio.  A fresh context is created on the next tone request.
     try {
-      if (_audioContext != null && _audioContext!.state == 'running') {
-        _audioContext!.suspend();
+      if (_audioContext != null) {
+        _audioContext!.close();
+        _audioContext = null;
       }
-    } catch (_) {}
+    } catch (_) {
+      _audioContext = null;
+    }
   }
 }

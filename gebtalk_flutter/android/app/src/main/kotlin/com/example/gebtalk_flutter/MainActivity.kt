@@ -167,6 +167,20 @@ class MainActivity : FlutterActivity() {
                 @Suppress("DEPRECATION")
                 am.isSpeakerphoneOn = isSpeaker
             }
+
+            // Re-apply after a short delay to handle race with flutter_webrtc's
+            // internal audio session management that may reset our routing.
+            mainHandler.postDelayed({
+                try {
+                    if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                        am.mode = AudioManager.MODE_IN_COMMUNICATION
+                    }
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                        @Suppress("DEPRECATION")
+                        am.isSpeakerphoneOn = isSpeaker
+                    }
+                } catch (_: Exception) {}
+            }, 150)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -198,7 +212,7 @@ class MainActivity : FlutterActivity() {
 
             // Cadenced ringback tone: 1.2s tone on, 2.8s tone off
             // This prevents continuous mixer overload and keeps hardware Acoustic Echo Canceller clean
-            toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 55)
+            toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
             var isTonePlaying = false
 
             dialToneRunnable = object : Runnable {

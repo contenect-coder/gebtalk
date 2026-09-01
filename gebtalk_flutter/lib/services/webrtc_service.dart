@@ -202,9 +202,22 @@ class WebRtcService extends ChangeNotifier {
           if (isCaller && (callState == 'calling' || callState == 'ringing') && status == 'connected') {
             final sdpAnswer = data['sdp_answer'];
             if (sdpAnswer != null) {
+              // Stop tones BEFORE setting remote description so the tone
+              // AudioContext is fully released before WebRTC audio takes over
+              CallAudioTonePlayer.stopAllTones();
+              
               callState = 'connecting';
               statusMessage = 'Connecting encrypted audio...';
               notifyListeners();
+              
+              // === DIAGNOSTIC: SDP Answer Audio Check ===
+              final answerStr = sdpAnswer.toString();
+              final hasAudio = answerStr.contains('m=audio');
+              final direction = answerStr.contains('a=sendrecv') ? 'sendrecv' 
+                  : answerStr.contains('a=recvonly') ? 'recvonly' 
+                  : answerStr.contains('a=sendonly') ? 'sendonly' 
+                  : answerStr.contains('a=inactive') ? 'inactive' : 'unknown';
+              debugPrint('[WebRTC][DIAG] SDP ANSWER: m=audio=${hasAudio} direction=$direction');
               
               await _peerConnection?.setRemoteDescription(
                 RTCSessionDescription(sdpAnswer, 'answer')
@@ -244,8 +257,8 @@ class WebRtcService extends ChangeNotifier {
               statusMessage = null;
               callStartTime = DateTime.now();
               _startDurationTimer();
-              CallAudioTonePlayer.stopAllTones();
               CallAudioTonePlayer.playCallConnectedChime();
+              debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED (caller side)');
               notifyListeners();
             }
           }
@@ -353,8 +366,9 @@ class WebRtcService extends ChangeNotifier {
       return false;
     }
 
-    // 2. Initialize audio mode to top earpiece receiver by default for voice calls
-    await _applyAudioRouting(false);
+    // NOTE: Do NOT set audio routing before getUserMedia.
+    // flutter_webrtc configures its own audio session during getUserMedia.
+    // Setting MODE_IN_COMMUNICATION prematurely causes race conditions.
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
@@ -378,23 +392,31 @@ class WebRtcService extends ChangeNotifier {
       }
     }
 
+    // === DIAGNOSTIC: Local Audio Track Status ===
     if (localStream != null) {
-      for (var track in localStream!.getAudioTracks()) {
+      final audioTracks = localStream!.getAudioTracks();
+      debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: ${audioTracks.isNotEmpty ? "FOUND" : "NOT FOUND"} (count: ${audioTracks.length})');
+      for (var track in audioTracks) {
+        debugPrint('[WebRTC][DIAG] LOCAL TRACK STATE: enabled=${track.enabled} | kind=${track.kind} | id=${track.id}');
         track.enabled = !isMuted;
       }
       // Allow microphone hardware to settle
       await Future.delayed(const Duration(milliseconds: 120));
+    } else {
+      debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: NOT FOUND (localStream is null)');
     }
     
     try {
       _isRemoteDescriptionSet = false;
       _peerConnection = await createPeerConnection(_iceConfiguration);
+      debugPrint('[WebRTC][DIAG] PEER CONNECTION: CREATED');
       
       // Add local tracks to peer connection if available
       if (localStream != null) {
         localStream!.getTracks().forEach((track) {
           _peerConnection!.addTrack(track, localStream!);
         });
+        debugPrint('[WebRTC][DIAG] Added ${localStream!.getTracks().length} local track(s) to PeerConnection');
       } else {
         try {
           await _peerConnection!.addTransceiver(
@@ -403,6 +425,7 @@ class WebRtcService extends ChangeNotifier {
               direction: TransceiverDirection.RecvOnly,
             ),
           );
+          debugPrint('[WebRTC][DIAG] Added RecvOnly audio transceiver (no mic)');
         } catch (_) {}
       }
 
@@ -419,7 +442,7 @@ class WebRtcService extends ChangeNotifier {
 
       // Handle connection states
       _peerConnection!.onIceConnectionState = (state) async {
-        debugPrint('[WebRTC] ICE connection state: $state');
+        debugPrint('[WebRTC][DIAG] ICE CONNECTION: $state');
         if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
             state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
           CallAudioTonePlayer.stopAllTones();
@@ -430,29 +453,43 @@ class WebRtcService extends ChangeNotifier {
           }
           if (_peerConnection != null) {
             _peerConnection!.getSenders().then((senders) {
+              debugPrint('[WebRTC][DIAG] SENDERS count: ${senders.length}');
               for (var sender in senders) {
                 if (sender.track != null && sender.track!.kind == 'audio') {
                   sender.track!.enabled = !isMuted;
+                  debugPrint('[WebRTC][DIAG] SENDER TRACK: kind=${sender.track!.kind} enabled=${sender.track!.enabled}');
+                }
+              }
+            }).catchError((_) {});
+            // Diagnostic: check receivers for remote audio
+            _peerConnection!.getReceivers().then((receivers) {
+              debugPrint('[WebRTC][DIAG] RECEIVERS count: ${receivers.length}');
+              for (var receiver in receivers) {
+                if (receiver.track != null) {
+                  debugPrint('[WebRTC][DIAG] RECEIVER TRACK: kind=${receiver.track!.kind} enabled=${receiver.track!.enabled}');
                 }
               }
             }).catchError((_) {});
           }
           await _applyAudioRouting(isSpeakerOn);
+          debugPrint('[WebRTC][DIAG] AUDIO OUTPUT: ${isSpeakerOn ? "SPEAKER" : "EARPIECE"} | MICROPHONE: ${isMuted ? "DISABLED" : "ENABLED"} | MUTE: ${isMuted ? "ON" : "OFF"}');
           if (callState != 'connected') {
             callState = 'connected';
             statusMessage = null;
             callStartTime ??= DateTime.now();
             _startDurationTimer();
+            debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED');
             notifyListeners();
           }
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
           if (callState == 'connected') {
             callState = 'reconnecting';
             statusMessage = 'Reconnecting...';
+            debugPrint('[WebRTC][DIAG] CALL STATE: RECONNECTING');
             notifyListeners();
           }
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-          debugPrint('[WebRTC] ICE connection state failed notification');
+          debugPrint('[WebRTC][DIAG] ICE CONNECTION: FAILED');
           if (callState != 'connected') {
             _transitionToTerminalState('failed');
           }
@@ -461,18 +498,21 @@ class WebRtcService extends ChangeNotifier {
 
       // Handle remote tracks
       _peerConnection!.onAddStream = (stream) async {
+        debugPrint('[WebRTC][DIAG] onAddStream fired — audio tracks: ${stream.getAudioTracks().length}');
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
         remoteRenderer.muted = false;
         WebRtcAudioSink.attachRemoteAudio(stream);
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
+          debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onAddStream): kind=${track.kind} enabled=${track.enabled} id=${track.id}');
         }
         await _applyAudioRouting(isSpeakerOn);
         notifyListeners();
       };
       
       _peerConnection!.onTrack = (event) async {
+        debugPrint('[WebRTC][DIAG] onTrack fired — track.kind=${event.track.kind} streams=${event.streams.length}');
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
@@ -480,6 +520,7 @@ class WebRtcService extends ChangeNotifier {
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
+            debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack): kind=${track.kind} enabled=${track.enabled} id=${track.id}');
           }
           await _applyAudioRouting(isSpeakerOn);
           notifyListeners();
@@ -487,6 +528,7 @@ class WebRtcService extends ChangeNotifier {
           final track = event.track;
           if (track.kind == 'audio') {
             track.enabled = true;
+            debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack no stream): kind=${track.kind} enabled=${track.enabled}');
             WebRtcAudioSink.attachRemoteTrack(track);
             await _applyAudioRouting(isSpeakerOn);
             notifyListeners();
@@ -540,7 +582,8 @@ class WebRtcService extends ChangeNotifier {
     errorMessage = null;
     WebRtcAudioSink.unlockAudio();
     CallAudioTonePlayer.playOutgoingDialTone();
-    await _applyAudioRouting(false);
+    // NOTE: Do NOT call _applyAudioRouting here — it races with getUserMedia
+    // and flutter_webrtc's audio session. Routing is applied after ICE connects.
     notifyListeners();
 
     // 35-second call timeout timer
@@ -627,7 +670,8 @@ class WebRtcService extends ChangeNotifier {
     callState = 'connecting';
     statusMessage = 'Connecting...';
     WebRtcAudioSink.unlockAudio();
-    await _applyAudioRouting(false);
+    // NOTE: Do NOT call _applyAudioRouting here — _setupPeerConnection will
+    // acquire the microphone first, then audio routing is applied after ICE connects.
     notifyListeners();
 
     final setupSuccess = await _setupPeerConnection();
@@ -652,6 +696,15 @@ class WebRtcService extends ChangeNotifier {
       if (offerSdp == null || offerSdp.isEmpty) {
         throw Exception('SDP Offer is missing for call $currentCallId');
       }
+      
+      // === DIAGNOSTIC: SDP Offer Audio Check ===
+      final offerStr = offerSdp.toString();
+      final hasAudio = offerStr.contains('m=audio');
+      final direction = offerStr.contains('a=sendrecv') ? 'sendrecv' 
+          : offerStr.contains('a=recvonly') ? 'recvonly' 
+          : offerStr.contains('a=sendonly') ? 'sendonly' 
+          : offerStr.contains('a=inactive') ? 'inactive' : 'unknown';
+      debugPrint('[WebRTC][DIAG] SDP OFFER: m=audio=$hasAudio direction=$direction');
       
       await _peerConnection!.setRemoteDescription(
         RTCSessionDescription(offerSdp, 'offer')
@@ -713,6 +766,7 @@ class WebRtcService extends ChangeNotifier {
         _startSignalingPolling();
         CallAudioTonePlayer.stopAllTones();
         CallAudioTonePlayer.playCallConnectedChime();
+        debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED (receiver side)');
         notifyListeners();
       } else {
         throw Exception('Server rejected call accept: status ${acceptRes.statusCode}');
