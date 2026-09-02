@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:http/http.dart' as http;
 import 'api_service.dart';
+import 'web_notification_service.dart';
 import '../utils/call_audio_tone_player.dart';
 import '../utils/webrtc_audio_sink.dart';
 
@@ -17,6 +18,7 @@ class WebRtcService extends ChangeNotifier {
   String? currentPeerAvatar;
   String? currentPeerEmail;
   bool isCaller = false;
+  final String _deviceId = 'dev_${DateTime.now().millisecondsSinceEpoch}';
   
   // Call State Machine:
   // 'idle', 'calling', 'ringing', 'connecting', 'connected', 'reconnecting', 'busy', 'declined', 'failed', 'ended', 'cancelled'
@@ -127,6 +129,16 @@ class WebRtcService extends ChangeNotifier {
   void initialize(String userId) {
     if (userId.isEmpty) return;
     currentUserId = userId;
+    debugPrint('[WebRTC] Initializing WebRTC service for user: $userId (deviceId: $_deviceId)');
+    
+    // Register device with backend for high-priority background VoIP wake-up
+    ApiService.registerDevice(
+      deviceId: _deviceId,
+      platform: kIsWeb ? 'WEB' : (defaultTargetPlatform == TargetPlatform.android ? 'ANDROID' : 'IOS'),
+      deviceName: kIsWeb ? 'GebTalk Web Client' : 'GebTalk App',
+    );
+    WebNotificationService.requestPermission();
+
     if (!_isRendererInitialized) {
       _isRendererInitialized = true;
       remoteRenderer.initialize().catchError((e) {
@@ -160,11 +172,14 @@ class WebRtcService extends ChangeNotifier {
     _stopSignalingPolling();
     _durationTimer?.cancel();
     _autoDismissTimer?.cancel();
+    WebNotificationService.closeActiveNotification();
     _cleanupCall();
   }
 
   void resetForLogout() {
     disposeService();
+    ApiService.unregisterDevice(_deviceId);
+    WebNotificationService.closeActiveNotification();
     currentUserId = null;
     currentCallId = null;
     currentPeerId = null;
@@ -206,6 +221,15 @@ class WebRtcService extends ChangeNotifier {
             callState = 'ringing';
             statusMessage = 'Incoming Voice Call...';
             CallAudioTonePlayer.playIncomingRingtone();
+            
+            // Present system/desktop incoming call alert if in background or on desktop
+            WebNotificationService.showIncomingCallNotification(
+              callerName: currentPeerName ?? 'GebTalk User',
+              callType: 'Voice',
+              onAnswer: () => acceptCall(),
+              onDecline: () => declineCall(),
+            );
+            
             notifyListeners();
             _startSignalingPolling();
           }
@@ -240,13 +264,28 @@ class WebRtcService extends ChangeNotifier {
           final data = json.decode(statusRes.body);
           final status = data['status'];
           
-          if (status == 'ended' || status == 'declined' || status == 'busy') {
-            _transitionToTerminalState(status == 'declined' ? 'declined' : (status == 'busy' ? 'busy' : 'ended'));
+          if (status == 'ended' || status == 'declined' || status == 'rejected' || status == 'cancelled' || status == 'busy') {
+            WebNotificationService.closeActiveNotification();
+            CallAudioTonePlayer.stopAllTones();
+            _transitionToTerminalState(
+              status == 'declined' || status == 'rejected' ? 'declined' : 
+              (status == 'cancelled' ? 'cancelled' : 
+              (status == 'busy' ? 'busy' : 'ended'))
+            );
+            return;
+          }
+          
+          // Multi-device call forking: if answered on another device
+          if (!isCaller && callState == 'ringing' && (status == 'connected' || status == 'answered')) {
+            debugPrint('[WebRTC] Call was answered on another device. Dismissing ringing.');
+            WebNotificationService.closeActiveNotification();
+            CallAudioTonePlayer.stopAllTones();
+            _transitionToTerminalState('ended');
             return;
           }
           
           // Caller side: Wait for accepted answer
-          if (isCaller && (callState == 'calling' || callState == 'ringing') && status == 'connected') {
+          if (isCaller && (callState == 'calling' || callState == 'ringing') && (status == 'connected' || status == 'answered')) {
             final sdpAnswer = data['sdp_answer'];
             if (sdpAnswer != null) {
               // Stop tones BEFORE setting remote description so the tone
@@ -791,6 +830,7 @@ class WebRtcService extends ChangeNotifier {
         body: json.encode({
           'call_id': int.parse(currentCallId!),
           'sdp_answer': answer.sdp,
+          'device_id': _deviceId,
         }),
       );
       
@@ -836,23 +876,12 @@ class WebRtcService extends ChangeNotifier {
   Future<void> declineCall() async {
     if (callState != 'ringing') return;
     final tempCallId = currentCallId;
+    WebNotificationService.closeActiveNotification();
+    CallAudioTonePlayer.stopAllTones();
     _transitionToTerminalState('declined');
     
     if (tempCallId != null) {
-      try {
-        await http.post(
-          Uri.parse('${ApiService.baseUrl}/calls/end'),
-          headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
-          body: json.encode({
-            'call_id': int.parse(tempCallId),
-            'duration': 0,
-            'state_before_end': 'ringing',
-            'reason': 'declined',
-          }),
-        );
-      } catch (e) {
-        debugPrint('[WebRTC] Error posting decline: $e');
-      }
+      ApiService.declineCall(int.parse(tempCallId));
     }
   }
 
@@ -867,6 +896,8 @@ class WebRtcService extends ChangeNotifier {
     final tempPeerEmail = currentPeerEmail;
     final isCancel = (callState == 'calling' || callState == 'ringing') && isCaller;
 
+    WebNotificationService.closeActiveNotification();
+    CallAudioTonePlayer.stopAllTones();
     _transitionToTerminalState(isCancel ? 'cancelled' : 'ended');
 
     // If caller hung up before connecting, trigger missed call transactional alert
@@ -880,19 +911,23 @@ class WebRtcService extends ChangeNotifier {
     }
 
     if (tempCallId != null) {
-      try {
-        await http.post(
-          Uri.parse('${ApiService.baseUrl}/calls/end'),
-          headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
-          body: json.encode({
-            'call_id': int.parse(tempCallId),
-            'duration': tempDuration,
-            'state_before_end': tempStateBeforeEnd,
-            'reason': isCancel ? 'cancelled' : 'ended',
-          }),
-        );
-      } catch (e) {
-        debugPrint('[WebRTC] Error posting end call: $e');
+      if (isCancel) {
+        ApiService.cancelCall(int.parse(tempCallId));
+      } else {
+        try {
+          await http.post(
+            Uri.parse('${ApiService.baseUrl}/calls/end'),
+            headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+            body: json.encode({
+              'call_id': int.parse(tempCallId),
+              'duration': tempDuration,
+              'state_before_end': tempStateBeforeEnd,
+              'reason': 'ended',
+            }),
+          );
+        } catch (e) {
+          debugPrint('[WebRTC] Error posting end call: $e');
+        }
       }
     }
   }

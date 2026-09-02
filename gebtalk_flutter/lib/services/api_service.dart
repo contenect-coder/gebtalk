@@ -2235,6 +2235,76 @@ class ApiService {
       return false;
     }
   }
+
+  // --- Background VoIP Device Registration ---
+
+  static Future<bool> registerDevice({
+    required String deviceId,
+    required String platform,
+    String? pushToken,
+    String? voipToken,
+    String? deviceName,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/devices/register'),
+        headers: _authHeaders(json: true),
+        body: jsonEncode({
+          'device_id': deviceId,
+          'platform': platform.toUpperCase(),
+          'push_token': pushToken ?? '',
+          'voip_token': voipToken ?? '',
+          'device_name': deviceName ?? 'GebTalk Device',
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] registerDevice error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> unregisterDevice(String deviceId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/devices/unregister'),
+        headers: _authHeaders(json: true),
+        body: jsonEncode({'device_id': deviceId}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] unregisterDevice error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> cancelCall(int callId, {String reason = 'cancelled'}) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/calls/cancel'),
+        headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+        body: jsonEncode({'call_id': callId, 'reason': reason}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] cancelCall error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> declineCall(int callId, {String reason = 'declined'}) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/calls/decline'),
+        headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+        body: jsonEncode({'call_id': callId, 'reason': reason}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] declineCall error: $e');
+      return false;
+    }
+  }
 }
 
 

@@ -406,6 +406,13 @@ def init_db(seed_test_data=False):
         ("user_profile", "is_active BOOLEAN DEFAULT TRUE"),
         ("user_profile", "created_by TEXT"),
         ("user_profile", "assigned_staff_id TEXT"),
+        # WebRTC Voice Calling background/offline columns
+        ("webrtc_calls", "call_type TEXT DEFAULT 'voice'"),
+        ("webrtc_calls", "answered_by_device_id TEXT"),
+        ("webrtc_calls", "answered_at TIMESTAMP"),
+        ("webrtc_calls", "ended_at TIMESTAMP"),
+        ("webrtc_calls", "duration_seconds INTEGER DEFAULT 0"),
+        ("webrtc_calls", "cancel_reason TEXT"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
@@ -826,6 +833,24 @@ def init_db(seed_test_data=False):
             report_type TEXT DEFAULT 'spam',
             reason TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Background VoIP Call Devices Registration table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_devices (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            push_token TEXT,
+            voip_token TEXT,
+            device_name TEXT,
+            is_active BOOLEAN DEFAULT TRUE,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, device_id)
         )
     ''')
 

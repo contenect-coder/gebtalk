@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import wraps
 import database
 from email_service import EmailService
+from push_service import PushService
 import threading
 import time
 
@@ -2171,6 +2172,80 @@ def get_webrtc_config():
         'iceCandidatePoolSize': 4
     })
 
+# ========== BACKGROUND VOIP DEVICE REGISTRATION ENDPOINTS ==========
+
+@app.route('/api/devices/register', methods=['POST'])
+@require_auth
+def register_device():
+    data = request.json or {}
+    device_id = data.get('device_id')
+    platform = (data.get('platform') or 'WEB').upper()
+    push_token = data.get('push_token') or ''
+    voip_token = data.get('voip_token') or ''
+    device_name = data.get('device_name') or f"GebTalk {platform.title()}"
+    
+    if not device_id:
+        return jsonify({'error': 'device_id is required'}), 400
+        
+    user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    did = f"dev_{device_id}"
+    cursor.execute('''
+        INSERT INTO user_devices (id, user_id, device_id, platform, push_token, voip_token, device_name, is_active, last_seen, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, device_id) DO UPDATE SET
+            platform = EXCLUDED.platform,
+            push_token = EXCLUDED.push_token,
+            voip_token = EXCLUDED.voip_token,
+            device_name = EXCLUDED.device_name,
+            is_active = TRUE,
+            last_seen = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+    ''', (did, user_id, device_id, platform, push_token, voip_token, device_name))
+    
+    # Also record in linked_devices for UI display
+    cursor.execute('''
+        INSERT INTO linked_devices (id, user_id, device_name, device_type, is_active, last_active)
+        VALUES (%s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
+        ON CONFLICT (id) DO UPDATE SET is_active = TRUE, last_active = CURRENT_TIMESTAMP
+    ''', (did, user_id, device_name, platform.lower()))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Device {device_id} registered for VoIP push notifications',
+        'device_id': device_id,
+        'platform': platform
+    })
+
+@app.route('/api/devices/unregister', methods=['POST'])
+@require_auth
+def unregister_device():
+    data = request.json or {}
+    device_id = data.get('device_id')
+    if not device_id:
+        return jsonify({'error': 'device_id is required'}), 400
+        
+    user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE user_devices SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE device_id = %s AND (user_id = %s OR user_id = %s)', (device_id, user_id, user_phone))
+    cursor.execute('UPDATE linked_devices SET is_active = FALSE WHERE (id = %s OR id = %s) AND (user_id = %s OR user_id = %s)', (device_id, f"dev_{device_id}", user_id, user_phone))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': f'Device {device_id} unregistered'})
+
 @app.route('/api/calls/create', methods=['POST'])
 def create_call():
     data = request.json or {}
@@ -2231,10 +2306,23 @@ def create_call():
                 cursor.execute("UPDATE webrtc_calls SET status = 'ended' WHERE id = %s", (active_callee_call['id'],))
                 conn.commit()
 
+    # Query caller display profile for wake-up payload
+    caller_name = caller_id
+    caller_avatar = ""
+    cursor.execute('SELECT name, avatar FROM users WHERE id = %s OR email = %s OR username = %s', (caller_id, caller_id, caller_id))
+    u_c = cursor.fetchone()
+    if u_c:
+        caller_name, caller_avatar = u_c['name'], u_c.get('avatar') or ''
+    else:
+        cursor.execute('SELECT name, avatar FROM user_profile WHERE id = %s OR phone = %s OR email = %s', (caller_id, caller_id, caller_id))
+        up_c = cursor.fetchone()
+        if up_c:
+            caller_name, caller_avatar = up_c['name'], up_c.get('avatar') or ''
+
     cursor.execute('''
-        INSERT INTO webrtc_calls (caller_id, callee_id, sdp_offer, status)
-        VALUES (%s, %s, %s, 'ringing')
-    ''', (caller_id, callee_id, sdp_offer))
+        INSERT INTO webrtc_calls (caller_id, callee_id, sdp_offer, status, call_type)
+        VALUES (%s, %s, %s, 'ringing', %s)
+    ''', (caller_id, callee_id, sdp_offer, call_type))
     
     call_id = getattr(cursor, 'lastrowid', None)
     if not call_id:
@@ -2244,6 +2332,19 @@ def create_call():
         
     conn.commit()
     conn.close()
+
+    # 2. Dispatch high-priority background VoIP wake-up push to all target callee devices
+    call_payload = {
+        'type': 'incoming_call',
+        'call_id': call_id,
+        'caller_id': caller_id,
+        'caller_name': caller_name,
+        'caller_avatar': caller_avatar,
+        'callee_id': callee_id,
+        'call_type': call_type,
+        'timestamp': datetime.now().isoformat()
+    }
+    PushService.dispatch_incoming_call(callee_id, call_payload, get_db_connection)
     
     return jsonify({'call_id': call_id, 'status': 'ringing', 'call_type': call_type})
 
@@ -2369,6 +2470,7 @@ def accept_call():
     data = request.json or {}
     call_id = data.get('call_id')
     sdp_answer = data.get('sdp_answer')
+    device_id = data.get('device_id') or 'default'
     
     if not call_id or not sdp_answer:
         return jsonify({'error': 'Missing call_id or sdp_answer'}), 400
@@ -2377,13 +2479,64 @@ def accept_call():
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE webrtc_calls
-        SET sdp_answer = %s, status = 'connected'
+        SET sdp_answer = %s, status = 'connected', answered_by_device_id = %s, answered_at = CURRENT_TIMESTAMP
         WHERE id = %s
-    ''', (sdp_answer, call_id))
+    ''', (sdp_answer, device_id, call_id))
     conn.commit()
+    
+    # Multi-device forking: tell other registered devices of this callee to stop ringing
+    cursor.execute('SELECT callee_id FROM webrtc_calls WHERE id = %s', (call_id,))
+    c_row = cursor.fetchone()
+    if c_row and c_row.get('callee_id'):
+        PushService.dispatch_call_answered(c_row['callee_id'], call_id, device_id, get_db_connection)
+        
     conn.close()
     
     return jsonify({'success': True, 'status': 'connected'})
+
+@app.route('/api/calls/cancel', methods=['POST'])
+def cancel_call():
+    data = request.json or {}
+    call_id = data.get('call_id')
+    reason = data.get('reason', 'cancelled')
+    
+    if not call_id:
+        return jsonify({'error': 'Missing call_id'}), 400
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, caller_id, callee_id, status FROM webrtc_calls WHERE id = %s', (call_id,))
+    row = cursor.fetchone()
+    if row and row['status'] not in ('ended', 'cancelled', 'rejected'):
+        cursor.execute("UPDATE webrtc_calls SET status = 'cancelled', cancel_reason = %s, ended_at = CURRENT_TIMESTAMP WHERE id = %s", (reason, call_id))
+        cursor.execute("DELETE FROM webrtc_candidates WHERE call_id = %s", (call_id,))
+        conn.commit()
+        PushService.dispatch_call_cancellation(row['callee_id'], call_id, reason, get_db_connection)
+        log_call_in_messages(row['id'], row['caller_id'], row['callee_id'], 0, False)
+    conn.close()
+    return jsonify({'success': True, 'status': 'cancelled'})
+
+@app.route('/api/calls/decline', methods=['POST'])
+def decline_call():
+    data = request.json or {}
+    call_id = data.get('call_id')
+    reason = data.get('reason', 'declined')
+    
+    if not call_id:
+        return jsonify({'error': 'Missing call_id'}), 400
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, caller_id, callee_id, status FROM webrtc_calls WHERE id = %s', (call_id,))
+    row = cursor.fetchone()
+    if row and row['status'] not in ('ended', 'cancelled', 'rejected'):
+        cursor.execute("UPDATE webrtc_calls SET status = 'rejected', cancel_reason = %s, ended_at = CURRENT_TIMESTAMP WHERE id = %s", (reason, call_id))
+        cursor.execute("DELETE FROM webrtc_candidates WHERE call_id = %s", (call_id,))
+        conn.commit()
+        PushService.dispatch_call_cancellation(row['callee_id'], call_id, reason, get_db_connection)
+        log_call_in_messages(row['id'], row['caller_id'], row['callee_id'], 0, False)
+    conn.close()
+    return jsonify({'success': True, 'status': 'rejected'})
 
 @app.route('/api/calls/status', methods=['GET'])
 def get_call_status():
