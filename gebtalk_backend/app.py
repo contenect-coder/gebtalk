@@ -3574,9 +3574,11 @@ def follow_newsletter(nid):
 @require_auth
 def get_linked_devices():
     user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM linked_devices WHERE user_id = %s AND is_active = TRUE ORDER BY last_active DESC', (user_phone,))
+    cursor.execute('SELECT * FROM linked_devices WHERE (user_id = %s OR user_id = %s) AND is_active = TRUE ORDER BY last_active DESC', (user_id, user_phone))
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return jsonify(rows)
@@ -3588,6 +3590,8 @@ def link_device():
     device_name = data.get('device_name', 'GebTalk Web')
     device_type = data.get('device_type', 'web')
     user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
     
     did = f"dev_{int(datetime.now().timestamp())}"
     conn = get_db()
@@ -3595,7 +3599,7 @@ def link_device():
     cursor.execute('''
         INSERT INTO linked_devices (id, user_id, device_name, device_type)
         VALUES (%s, %s, %s, %s)
-    ''', (did, user_phone, device_name, device_type))
+    ''', (did, user_id, device_name, device_type))
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'device_id': did})
@@ -3604,9 +3608,11 @@ def link_device():
 @require_auth
 def unlink_device(did):
     user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('UPDATE linked_devices SET is_active = FALSE WHERE id = %s AND user_id = %s', (did, user_phone))
+    cursor.execute('UPDATE linked_devices SET is_active = FALSE WHERE id = %s AND (user_id = %s OR user_id = %s)', (did, user_id, user_phone))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3621,6 +3627,8 @@ def report_contact():
     report_type = data.get('report_type', 'spam')
     reason = data.get('reason', '')
     user_phone = get_authenticated_phone()
+    profile = get_user_profile(user_phone)
+    user_id = profile['id'] if profile else user_phone
     
     if not reported_id:
         return jsonify({'error': 'reported_id required'}), 400
@@ -3630,7 +3638,7 @@ def report_contact():
     cursor.execute('''
         INSERT INTO reports (reporter_id, reported_id, report_type, reason)
         VALUES (%s, %s, %s, %s)
-    ''', (user_phone, reported_id, report_type, reason))
+    ''', (user_id, reported_id, report_type, reason))
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'message': 'Report submitted successfully'})
