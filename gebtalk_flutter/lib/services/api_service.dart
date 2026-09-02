@@ -18,12 +18,17 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
       if (saved != null && saved.isNotEmpty) {
-        if ((saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) || saved.contains('netlify.app')) {
+        if (saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) {
           _customBaseUrl = defaultFallbackUrl;
-          prefs.setString('saved_custom_base_url', defaultFallbackUrl);
+          await prefs.setString('saved_custom_base_url', defaultFallbackUrl);
+        } else if (saved.contains('netlify.app') || saved == '/api') {
+          _customBaseUrl = defaultFallbackUrl;
+          await prefs.setString('saved_custom_base_url', defaultFallbackUrl);
         } else {
           _customBaseUrl = saved;
         }
+      } else {
+        _customBaseUrl = defaultFallbackUrl;
       }
     } catch (_) {}
   }
@@ -38,6 +43,19 @@ class ApiService {
   static const String _envApiUrl = String.fromEnvironment('API_URL', defaultValue: '');
 
   static String get baseUrl {
+    if (kIsWeb) {
+      final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
+      // If deployed on netlify or custom domain, ALWAYS connect directly to the active tunnel
+      if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
+        if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty && !_customBaseUrl!.contains('netlify.app')) {
+          if (_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) {
+            return defaultFallbackUrl;
+          }
+          return _customBaseUrl!;
+        }
+        return defaultFallbackUrl;
+      }
+    }
     if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
       if ((_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) || _customBaseUrl!.contains('netlify.app')) {
         return defaultFallbackUrl;
@@ -48,7 +66,6 @@ class ApiService {
     if (kIsWeb) {
       final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
       if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
-        // Production web deployment: route directly to active cloud tunnel
         return defaultFallbackUrl;
       }
       return 'http://$host:5000/api';
