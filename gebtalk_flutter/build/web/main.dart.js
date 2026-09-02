@@ -29900,7 +29900,7 @@ s=6
 return A.j(A.vD(),$async$aa_)
 case 6:o=b
 n=A.cE(o.a.h(0,"saved_custom_base_url"))
-if(n!=null&&n.length!==0)if(B.c.m(n,"trycloudflare.com")&&n!==u.B){$.a9b=u.B
+if(n!=null&&n.length!==0)if(B.c.m(n,"trycloudflare.com")&&n!==u.B||B.c.m(n,"netlify.app")){$.a9b=u.B
 o.tL("String","saved_custom_base_url",u.B)}else $.a9b=n
 q=1
 s=5
@@ -29918,7 +29918,7 @@ aa2(a){var s,r
 try{s=Date.now()
 A.d6(A.aD(A.aM()+"/debug/log?msg="+A.wF(2,a,B.aP,!1)+"&_t="+A.f(s)),null)}catch(r){}},
 aM(){var s,r=u.B,q=$.a9b
-if(q!=null&&q.length!==0){if(B.c.m(q,"trycloudflare.com")&&q!==r)return r
+if(q!=null&&q.length!==0){if(B.c.m(q,"trycloudflare.com")&&q!==r||B.c.m(q,"netlify.app"))return r
 return q}s=A.Jk().gik().length!==0?A.Jk().gik():"127.0.0.1"
 if(s!=="localhost"&&s!=="127.0.0.1"&&!B.c.aX(s,"192.168.")&&!B.c.aX(s,"10."))return r
 return"http://"+s+":5000/api"},

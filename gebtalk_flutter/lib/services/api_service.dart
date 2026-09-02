@@ -18,7 +18,7 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
       if (saved != null && saved.isNotEmpty) {
-        if (saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) {
+        if ((saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) || saved.contains('netlify.app')) {
           _customBaseUrl = defaultFallbackUrl;
           prefs.setString('saved_custom_base_url', defaultFallbackUrl);
         } else {
@@ -39,7 +39,7 @@ class ApiService {
 
   static String get baseUrl {
     if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
-      if (_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) {
+      if ((_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) || _customBaseUrl!.contains('netlify.app')) {
         return defaultFallbackUrl;
       }
       return _customBaseUrl!;
