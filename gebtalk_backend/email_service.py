@@ -32,7 +32,7 @@ class EmailService:
         }
 
     @classmethod
-    def send_email(cls, to_email: str, subject: str, html_content: str, text_content: str = None) -> tuple[bool, str]:
+    def send_email(cls, to_email: str, subject: str, html_content: str, text_content: str | None = None) -> tuple[bool, str]:
         """
         Universal email sender:
         1. Tries Resend API if RESEND_API_KEY is configured.
@@ -276,7 +276,7 @@ class EmailService:
         return cls.send_email(to_email, subject, html_content, text_content)
 
     @classmethod
-    def send_chat_forward_email(cls, to_email: str, sender_name: str, subject: str, chat_text: str, sender_email: str = None) -> tuple[bool, str]:
+    def send_chat_forward_email(cls, to_email: str, sender_name: str, subject: str, chat_text: str, sender_email: str | None = None) -> tuple[bool, str]:
         email_subject = f"📋 [GEBTALK Chat] {subject}"
         text_content = f"Forwarded chat conversation from {sender_name} ({sender_email or 'GEBTALK User'}):\n\n{chat_text}\n\nSent via GEBTALK Unified Communications."
         

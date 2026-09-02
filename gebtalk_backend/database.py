@@ -1,8 +1,8 @@
 import sqlite3
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
+import psycopg2  # type: ignore
+from psycopg2.extras import RealDictCursor  # type: ignore
+from psycopg2.pool import ThreadedConnectionPool  # type: ignore
 
 def load_env():
     env_path = os.path.join(os.path.dirname(__file__), '.env')
