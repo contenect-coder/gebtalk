@@ -168,19 +168,41 @@ class MainActivity : FlutterActivity() {
                 am.isSpeakerphoneOn = isSpeaker
             }
 
-            // Re-apply after a short delay to handle race with flutter_webrtc's
-            // internal audio session management that may reset our routing.
-            mainHandler.postDelayed({
+            // Re-apply after short delays to prevent race conditions with flutter_webrtc's
+            // internal audio session setup that might inadvertently reset routing to speaker.
+            val reapplyRunnable = Runnable {
                 try {
                     if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
                         am.mode = AudioManager.MODE_IN_COMMUNICATION
                     }
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val devs = am.availableCommunicationDevices
+                        if (isSpeaker) {
+                            val spk = devs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                            if (spk != null) am.setCommunicationDevice(spk)
+                            am.isSpeakerphoneOn = true
+                        } else {
+                            val hs = devs.firstOrNull {
+                                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                                it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                            }
+                            val ear = devs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                            val tgt = hs ?: ear
+                            if (tgt != null) am.setCommunicationDevice(tgt) else am.clearCommunicationDevice()
+                            am.isSpeakerphoneOn = false
+                        }
+                    } else {
                         @Suppress("DEPRECATION")
                         am.isSpeakerphoneOn = isSpeaker
                     }
                 } catch (_: Exception) {}
-            }, 150)
+            }
+
+            mainHandler.postDelayed(reapplyRunnable, 150)
+            mainHandler.postDelayed(reapplyRunnable, 450)
+            mainHandler.postDelayed(reapplyRunnable, 1000)
         } catch (e: Exception) {
             e.printStackTrace()
         }

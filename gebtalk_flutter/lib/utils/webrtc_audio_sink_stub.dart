@@ -2,8 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+/// Native mobile / desktop stub for WebRtcAudioSink
 class WebRtcAudioSinkImpl {
   static const _channel = MethodChannel('gebtalk/audio_control');
+  static bool _isSpeaker = false;
 
   static Future<bool> checkAndRequestMicrophonePermission() async {
     try {
@@ -16,11 +18,11 @@ class WebRtcAudioSinkImpl {
   }
 
   static void attachRemoteAudio(MediaStream stream) {
-    // Native mobile handles audio through OS audio framework
+    // Native mobile handles audio track decoding through native WebRTC engine
   }
 
   static void attachRemoteTrack(MediaStreamTrack track) {
-    // Native mobile cleanup
+    // Native mobile handles audio track decoding through native WebRTC engine
   }
 
   static void detachRemoteAudio() {
@@ -34,8 +36,33 @@ class WebRtcAudioSinkImpl {
   }
 
   static Future<void> setSpeakerphoneOn(bool isSpeaker) async {
+    _isSpeaker = isSpeaker;
     try {
       await _channel.invokeMethod('setSpeakerphoneOn', {'isSpeaker': isSpeaker});
     } catch (_) {}
+  }
+
+  static Future<List<Map<String, String>>> getAudioInputDevices() async {
+    return [];
+  }
+
+  static Future<List<Map<String, String>>> getAudioOutputDevices() async {
+    return [];
+  }
+
+  static Future<bool> setAudioOutputDevice(String deviceId, {String? label}) async {
+    return true;
+  }
+
+  static Map<String, dynamic> getAudioDiagnostics() {
+    return {
+      'elementConnected': true,
+      'isPlaying': true,
+      'isPaused': false,
+      'isMuted': false,
+      'volume': 1.0,
+      'hasSrcObject': true,
+      'activeSink': _isSpeaker ? 'Loudspeaker' : 'Earpiece / Receiver',
+    };
   }
 }

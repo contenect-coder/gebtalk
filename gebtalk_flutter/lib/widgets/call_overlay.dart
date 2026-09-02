@@ -120,27 +120,64 @@ class _CallOverlayState extends State<CallOverlay> {
                           ),
                           if (_showDiagnostics)
                             Padding(
-                              padding: const EdgeInsets.only(top: 10.0, left: 24.0, right: 24.0),
+                              padding: const EdgeInsets.only(top: 8.0, left: 16.0, right: 16.0),
                               child: Container(
+                                constraints: const BoxConstraints(maxHeight: 280),
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.85),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                                  color: Colors.black.withValues(alpha: 0.90),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('─── CALL AUDIO DIAGNOSTICS ───', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                                    const SizedBox(height: 6),
-                                    _buildDiagRow('CALL STATE', state.toUpperCase()),
-                                    _buildDiagRow('LOCAL AUDIO TRACK', webrtcService.hasLocalAudioTrack ? 'FOUND (LIVE)' : 'NOT FOUND'),
-                                    _buildDiagRow('REMOTE AUDIO TRACK', webrtcService.hasRemoteAudioTrack ? 'FOUND (LIVE)' : 'WAITING'),
-                                    _buildDiagRow('ICE CONNECTION', webrtcService.lastIceConnectionState ?? 'UNKNOWN'),
-                                    _buildDiagRow('AUDIO OUTPUT', webrtcService.audioOutputMode ?? 'DEFAULT'),
-                                    _buildDiagRow('MICROPHONE', webrtcService.isMuted ? 'MUTED' : 'TRANSMITTING'),
-                                    _buildDiagRow('SPEAKERPHONE', webrtcService.isSpeakerOn ? 'ON' : 'OFF'),
-                                  ],
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text('─── CALL AUDIO DIAGNOSTICS ───', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                                          InkWell(
+                                            onTap: () async {
+                                              await webrtcService.refreshAudioDiagnostics();
+                                            },
+                                            child: const Icon(Icons.refresh, color: AppColors.primary, size: 14),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      _buildDiagRow('CALL STATE', state.toUpperCase()),
+                                      _buildDiagRow('LOCAL AUDIO TRACK', webrtcService.localTrackState),
+                                      _buildDiagRow('REMOTE AUDIO TRACK', webrtcService.hasRemoteAudioTrack ? 'FOUND' : 'NOT FOUND'),
+                                      _buildDiagRow('REMOTE TRACK STATE', webrtcService.remoteTrackState),
+                                      _buildDiagRow('AUDIO RECEIVERS', '${webrtcService.audioReceiversCount}'),
+                                      _buildDiagRow('AUDIO INPUT DEVICE', webrtcService.currentAudioInputDevice),
+                                      _buildDiagRow('AUDIO OUTPUT DEVICE', webrtcService.currentAudioOutputDevice),
+                                      _buildDiagRow('MOBILE OUTPUT ROUTE', webrtcService.isSpeakerOn ? 'SPEAKER (BOTTOM)' : 'EARPIECE (TOP)'),
+                                      _buildDiagRow('SPEAKERPHONE', webrtcService.isSpeakerOn ? 'ON' : 'OFF'),
+                                      _buildDiagRow('MUTE', webrtcService.isMuted ? 'ON' : 'OFF'),
+                                      _buildDiagRow('AUDIO SESSION', webrtcService.isAudioSessionActive ? 'ACTIVE (VOICE_COMM)' : 'INACTIVE'),
+                                      _buildDiagRow('RINGTONE', webrtcService.isRingtonePlaying ? 'PLAYING' : 'STOPPED'),
+                                      _buildDiagRow('REMOTE AUDIO ELEMENT', webrtcService.remoteAudioElementDiag['elementConnected'] == true ? 'CONNECTED (DOM)' : 'NOT CONNECTED'),
+                                      _buildDiagRow('REMOTE AUDIO ELEMENT STATE', webrtcService.remoteAudioElementDiag['isPlaying'] == true ? 'PLAYING (UNMUTED)' : (webrtcService.remoteAudioElementDiag['isPaused'] == true ? 'PAUSED' : 'WAITING')),
+                                      if (webrtcService.availableAudioOutputs.isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        Center(
+                                          child: TextButton.icon(
+                                            style: TextButton.styleFrom(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                              backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            icon: const Icon(Icons.headphones, color: AppColors.primary, size: 14),
+                                            label: const Text('SELECT AUDIO OUTPUT', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold)),
+                                            onPressed: () => _showAudioDeviceDialog(context, webrtcService),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -645,16 +682,94 @@ class _CallOverlayState extends State<CallOverlay> {
   }
 
   Widget _buildDiagRow(String label, String value) {
-    final bool isGood = value.contains('FOUND') || value.contains('CONNECTED') || value.contains('LIVE') || value.contains('TRANSMITTING');
+    final bool isGood = value.contains('FOUND') || value.contains('CONNECTED') || value.contains('LIVE') || value.contains('TRANSMITTING') || value.contains('ACTIVE') || value.contains('PLAYING');
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600)),
-          Text(value, style: TextStyle(color: isGood ? const Color(0xFF00E676) : (value.contains('NOT') || value.contains('FAILED') ? const Color(0xFFFF5252) : const Color(0xFFFFD700)), fontSize: 10, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isGood
+                    ? const Color(0xFF00E676)
+                    : (value.contains('NOT') || value.contains('FAILED') || value.contains('WAITING')
+                        ? const Color(0xFFFF5252)
+                        : const Color(0xFFFFD700)),
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  void _showAudioDeviceDialog(BuildContext context, WebRtcService svc) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppColors.midnightNavy.withValues(alpha: 0.95),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: AppColors.primary.withValues(alpha: 0.4)),
+          ),
+          title: Row(
+            children: const [
+              Icon(Icons.headphones, color: AppColors.primary),
+              SizedBox(width: 10),
+              Text('Select Audio Output', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: svc.availableAudioOutputs.length + 1,
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  final isSelected = svc.currentAudioOutputDevice.contains('Default') || svc.currentAudioOutputDevice.contains('Headphones');
+                  return ListTile(
+                    leading: const Icon(Icons.settings_input_component, color: AppColors.primary, size: 20),
+                    title: const Text('Default System Output / Headphones', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    trailing: isSelected ? const Icon(Icons.check_circle, color: AppColors.primary, size: 18) : null,
+                    onTap: () async {
+                      await svc.setAudioOutputDevice('', label: 'Default System Output / Headphones');
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  );
+                }
+                final dev = svc.availableAudioOutputs[index - 1];
+                final devId = dev['deviceId'] ?? '';
+                final devLabel = dev['label'] ?? 'Audio Device $index';
+                final isSelected = svc.currentAudioOutputDevice == devLabel;
+                return ListTile(
+                  leading: const Icon(Icons.volume_up, color: Colors.white70, size: 20),
+                  title: Text(devLabel, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  trailing: isSelected ? const Icon(Icons.check_circle, color: AppColors.primary, size: 18) : null,
+                  onTap: () async {
+                    await svc.setAudioOutputDevice(devId, label: devLabel);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CLOSE', style: TextStyle(color: AppColors.textMuted)),
+            ),
+          ],
+        );
+      },
     );
   }
 }

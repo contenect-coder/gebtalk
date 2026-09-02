@@ -44,10 +44,52 @@ class WebRtcService extends ChangeNotifier {
   int _lastFetchedCandidateId = 0;
   String? _cachedOfferSdp;
   String lastIceConnectionState = 'NEW';
+  int audioReceiversCount = 0;
+  String remoteTrackState = 'NOT RECEIVED';
+  String localTrackState = 'NOT FOUND';
+  String currentAudioInputDevice = 'Default Microphone';
+  String currentAudioOutputDevice = 'Default Output / Headphones';
+  List<Map<String, String>> availableAudioInputs = [];
+  List<Map<String, String>> availableAudioOutputs = [];
+  Map<String, dynamic> remoteAudioElementDiag = {};
 
   bool get hasLocalAudioTrack => localStream != null && localStream!.getAudioTracks().isNotEmpty;
   bool get hasRemoteAudioTrack => remoteStream != null && remoteStream!.getAudioTracks().isNotEmpty;
   String get audioOutputMode => isSpeakerOn ? 'SPEAKER' : 'EARPIECE';
+  bool get isAudioSessionActive => callState == 'connected' || callState == 'connecting';
+  bool get isRingtonePlaying => (callState == 'ringing' && !isCaller) || (callState == 'calling' && isCaller);
+
+  Future<void> refreshAudioDiagnostics() async {
+    try {
+      if (_peerConnection != null) {
+        final receivers = await _peerConnection!.getReceivers();
+        audioReceiversCount = receivers.where((r) => r.track?.kind == 'audio').length;
+      } else {
+        audioReceiversCount = 0;
+      }
+      remoteAudioElementDiag = WebRtcAudioSink.getAudioDiagnostics();
+      availableAudioInputs = await WebRtcAudioSink.getAudioInputDevices();
+      availableAudioOutputs = await WebRtcAudioSink.getAudioOutputDevices();
+      if (remoteAudioElementDiag['activeSink'] != null) {
+        currentAudioOutputDevice = remoteAudioElementDiag['activeSink'].toString();
+      }
+      if (availableAudioInputs.isNotEmpty) {
+        currentAudioInputDevice = availableAudioInputs.first['label'] ?? 'Default Microphone';
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[WebRTC] refreshAudioDiagnostics error: $e');
+    }
+  }
+
+  Future<void> setAudioOutputDevice(String deviceId, {String? label}) async {
+    await WebRtcAudioSink.setAudioOutputDevice(deviceId, label: label);
+    if (label != null) {
+      currentAudioOutputDevice = label;
+    }
+    await refreshAudioDiagnostics();
+    notifyListeners();
+  }
   
   Map<String, dynamic> _iceConfiguration = {
     'iceServers': [
@@ -400,14 +442,16 @@ class WebRtcService extends ChangeNotifier {
     // === DIAGNOSTIC: Local Audio Track Status ===
     if (localStream != null) {
       final audioTracks = localStream!.getAudioTracks();
-      debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: ${audioTracks.isNotEmpty ? "FOUND" : "NOT FOUND"} (count: ${audioTracks.length})');
+      localTrackState = audioTracks.isNotEmpty ? 'FOUND (LIVE)' : 'NOT FOUND';
+      debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: $localTrackState (count: ${audioTracks.length})');
       for (var track in audioTracks) {
-        debugPrint('[WebRTC][DIAG] LOCAL TRACK STATE: enabled=${track.enabled} | kind=${track.kind} | id=${track.id}');
+        debugPrint('[WebRTC][DIAG] LOCAL TRACK STATE: enabled=${track.enabled} | kind=${track.kind} | muted=${track.muted} | id=${track.id}');
         track.enabled = !isMuted;
       }
       // Allow microphone hardware to settle
       await Future.delayed(const Duration(milliseconds: 120));
     } else {
+      localTrackState = 'NOT FOUND';
       debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: NOT FOUND (localStream is null)');
     }
     
@@ -486,8 +530,9 @@ class WebRtcService extends ChangeNotifier {
             callStartTime ??= DateTime.now();
             _startDurationTimer();
             debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED');
-            notifyListeners();
           }
+          await refreshAudioDiagnostics();
+          notifyListeners();
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
           if (callState == 'connected') {
             callState = 'reconnecting';
@@ -505,21 +550,25 @@ class WebRtcService extends ChangeNotifier {
 
       // Handle remote tracks
       _peerConnection!.onAddStream = (stream) async {
-        debugPrint('[WebRTC][DIAG] onAddStream fired — audio tracks: ${stream.getAudioTracks().length}');
+        debugPrint('[WebRTC][DIAG] onAddStream fired — audio tracks count: ${stream.getAudioTracks().length}');
         remoteStream = stream;
         remoteRenderer.srcObject = stream;
         remoteRenderer.muted = false;
+        remoteTrackState = 'LIVE';
         WebRtcAudioSink.attachRemoteAudio(stream);
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
-          debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onAddStream): kind=${track.kind} enabled=${track.enabled} id=${track.id}');
+          debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onAddStream): kind=${track.kind} enabled=${track.enabled} muted=${track.muted} id=${track.id}');
         }
         await _applyAudioRouting(isSpeakerOn);
+        await refreshAudioDiagnostics();
         notifyListeners();
       };
       
       _peerConnection!.onTrack = (event) async {
-        debugPrint('[WebRTC][DIAG] onTrack fired — track.kind=${event.track.kind} streams=${event.streams.length}');
+        debugPrint('[WebRTC][DIAG] onTrack fired — track.kind=${event.track.kind} enabled=${event.track.enabled} muted=${event.track.muted} streams=${event.streams.length}');
+        remoteTrackState = (event.track.enabled && !(event.track.muted ?? false)) ? 'LIVE' : 'LIVE';
+        
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
           remoteRenderer.srcObject = event.streams[0];
@@ -529,18 +578,17 @@ class WebRtcService extends ChangeNotifier {
             track.enabled = true;
             debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack): kind=${track.kind} enabled=${track.enabled} id=${track.id}');
           }
-          await _applyAudioRouting(isSpeakerOn);
-          notifyListeners();
         } else {
           final track = event.track;
           if (track.kind == 'audio') {
             track.enabled = true;
             debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack no stream): kind=${track.kind} enabled=${track.enabled}');
             WebRtcAudioSink.attachRemoteTrack(track);
-            await _applyAudioRouting(isSpeakerOn);
-            notifyListeners();
           }
         }
+        await _applyAudioRouting(isSpeakerOn);
+        await refreshAudioDiagnostics();
+        notifyListeners();
       };
       return true;
     } catch (e) {
