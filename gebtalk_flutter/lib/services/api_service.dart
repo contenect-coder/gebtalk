@@ -10,7 +10,7 @@ import '../utils/error_handler.dart';
 class ApiService {
   static String? authenticatedPhone;
 
-  static const String defaultFallbackUrl = 'https://transform-vast-chain-feature.trycloudflare.com/api';
+  static const String defaultFallbackUrl = 'https://homeland-hewlett-animated-temp.trycloudflare.com/api';
   static String? _customBaseUrl;
 
   static Future<void> init() async {
