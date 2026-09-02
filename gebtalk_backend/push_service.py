@@ -1,13 +1,32 @@
 """
 Push Notification & Background Call Wake-Up Service for GEBTALK VoIP.
-Handles device registration, high-priority background push delivery, and multi-device call cancellation.
+Handles device registration, high-priority background push delivery (Web Push VAPID, Android FCM, iOS APNs),
+and multi-device call cancellation.
 """
 
 import json
 import os
 import threading
 import time
+import base64
 from datetime import datetime
+
+# VAPID Keys for Web Push (RFC 8291 / RFC 8292)
+VAPID_PUBLIC_KEY = os.environ.get(
+    'VAPID_PUBLIC_KEY',
+    'BEfy1vheyPUbkIV4MS2wwWCeZ7IF5OCqnoN7DBngsFRFmDHYKYSMpvcF3-mh7gaRg16k8vNUBNOiZGKUo3bxi5k'
+)
+VAPID_PRIVATE_KEY_B64 = os.environ.get(
+    'VAPID_PRIVATE_KEY_B64',
+    'LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZ3Z0a0l2b2s5MHl1U1MvNWQKdW9QeGtpV3hLdnYxQTg2czBEMGpRMG9ITkFDaFJBTkNBQVJIOHRiNFhzajFHNUNGZURFdHNNRmdubWV5QmVUZwpxcDZEZXd3WjRMQlVSWmd4MkNtRWpLYjNCZC9wb2U0R2tZTmVwUEx6VkFUVG9tUmlsS04yOFl1WgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=='
+)
+VAPID_CLAIMS = {"sub": "mailto:admin@gebtalk.com"}
+
+try:
+    VAPID_PRIVATE_KEY = base64.b64decode(VAPID_PRIVATE_KEY_B64).decode('utf-8')
+except Exception:
+    VAPID_PRIVATE_KEY = VAPID_PRIVATE_KEY_B64
+
 
 class PushService:
     @staticmethod
@@ -97,13 +116,13 @@ class PushService:
                 push_token = dev.get('push_token')
                 voip_token = dev.get('voip_token')
                 
-                print(f"[PUSH SERVICE][DIAG]   -> Dispatching to [{platform}] device '{dev_id}' (token: {push_token[:15] if push_token else 'N/A'}...)", flush=True)
+                print(f"[PUSH SERVICE][DIAG]   -> Dispatching to [{platform}] device '{dev_id}'", flush=True)
                 
                 if platform == 'ANDROID' and push_token:
                     PushService._send_fcm_call_payload(push_token, call_payload, high_priority=True)
                 elif platform == 'IOS' and (voip_token or push_token):
                     PushService._send_apns_voip_payload(voip_token or push_token, call_payload)
-                elif platform in ('WEB', 'DESKTOP'):
+                elif platform in ('WEB', 'DESKTOP') and push_token:
                     PushService._send_web_push_payload(push_token, call_payload)
                     
             print(f"[PUSH SERVICE][DIAG] -------------------------------------------------------------", flush=True)
@@ -134,7 +153,7 @@ class PushService:
                     PushService._send_fcm_call_payload(push_token, cancel_payload, high_priority=False)
                 elif platform == 'IOS' and push_token:
                     PushService._send_apns_voip_payload(push_token, cancel_payload)
-                elif platform in ('WEB', 'DESKTOP'):
+                elif platform in ('WEB', 'DESKTOP') and push_token:
                     PushService._send_web_push_payload(push_token, cancel_payload)
 
         threading.Thread(target=_dispatch, daemon=True).start()
@@ -164,25 +183,99 @@ class PushService:
                     PushService._send_fcm_call_payload(push_token, fork_payload, high_priority=False)
                 elif platform == 'IOS' and push_token:
                     PushService._send_apns_voip_payload(push_token, fork_payload)
-                elif platform in ('WEB', 'DESKTOP'):
+                elif platform in ('WEB', 'DESKTOP') and push_token:
                     PushService._send_web_push_payload(push_token, fork_payload)
 
         threading.Thread(target=_dispatch, daemon=True).start()
 
+    @staticmethod
+    def send_test_push(user_id, message, db_connection_func):
+        """
+        Sends an immediate test push notification to all registered devices of the given user.
+        """
+        devices = PushService.get_callee_devices(user_id, db_connection_func)
+        test_payload = {
+            'type': 'test_push',
+            'title': '🔔 GEBTALK TEST',
+            'body': message or 'Push notifications are working properly.',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        results = []
+        for dev in devices:
+            platform = dev.get('platform', 'WEB').upper()
+            push_token = dev.get('push_token')
+            dev_id = dev.get('device_id')
+            
+            success = False
+            err_msg = None
+            if platform in ('WEB', 'DESKTOP') and push_token:
+                success, err_msg = PushService._send_web_push_payload(push_token, test_payload)
+            elif platform == 'ANDROID' and push_token:
+                success, err_msg = PushService._send_fcm_call_payload(push_token, test_payload, high_priority=False)
+            elif platform == 'IOS' and push_token:
+                success, err_msg = PushService._send_apns_voip_payload(push_token, test_payload)
+            else:
+                err_msg = 'No push token available'
+                
+            results.append({
+                'device_id': dev_id,
+                'platform': platform,
+                'success': success,
+                'error': err_msg
+            })
+            
+        return {
+            'success': True,
+            'devices_found': len(devices),
+            'results': results,
+            'timestamp': datetime.now().isoformat()
+        }
+
     # --- Low-level dispatch handlers ---
+
+    @staticmethod
+    def _send_web_push_payload(token_or_sub, payload):
+        """
+        Sends Web Push message via pywebpush with VAPID credentials.
+        """
+        try:
+            from pywebpush import webpush, WebPushException
+            sub_info = None
+            if isinstance(token_or_sub, str):
+                if token_or_sub.startswith('{'):
+                    sub_info = json.loads(token_or_sub)
+                else:
+                    sub_info = {"endpoint": token_or_sub}
+            elif isinstance(token_or_sub, dict):
+                sub_info = token_or_sub
+
+            if not sub_info or not sub_info.get('endpoint'):
+                print("[PUSH SERVICE][WEB PUSH] Missing endpoint in subscription", flush=True)
+                return False, "Missing endpoint"
+
+            resp = webpush(
+                subscription_info=sub_info,
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS,
+                ttl=60
+            )
+            print(f"[PUSH SERVICE][WEB PUSH SUCCESS] Status {resp.status_code}", flush=True)
+            return True, None
+        except Exception as e:
+            print(f"[PUSH SERVICE][WEB PUSH ERROR] {e}", flush=True)
+            return False, str(e)
 
     @staticmethod
     def _send_fcm_call_payload(token, payload, high_priority=True):
         """
         Sends high-priority data-only FCM push message to Android.
-        Data-only messages wake Android Background Services directly without showing default chat popups.
         """
-        # Checks for FCM Server Key or Google Application Credentials
         fcm_key = os.environ.get('FCM_SERVER_KEY')
         if not fcm_key:
-            # Simulated environment logging
             print(f"[PUSH SERVICE][FCM SIMULATION] High-Priority Push to Android token {token[:16]}... payload: {payload.get('type')}", flush=True)
-            return
+            return True, "Simulated (No FCM key configured)"
 
         try:
             import urllib.request
@@ -199,8 +292,10 @@ class PushService:
             req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
             with urllib.request.urlopen(req, timeout=5) as resp:
                 print(f"[PUSH SERVICE][FCM SUCCESS] Sent to {token[:16]}... status: {resp.status}", flush=True)
+                return True, None
         except Exception as e:
             print(f"[PUSH SERVICE][FCM ERROR] Delivery failed: {e}", flush=True)
+            return False, str(e)
 
     @staticmethod
     def _send_apns_voip_payload(token, payload):
@@ -208,10 +303,4 @@ class PushService:
         Sends VoIP PushKit push payload to iOS.
         """
         print(f"[PUSH SERVICE][APNS SIMULATION] VoIP Push to iOS token {token[:16]}... payload: {payload.get('type')}", flush=True)
-
-    @staticmethod
-    def _send_web_push_payload(token, payload):
-        """
-        Sends Web Push message for Desktop / Web browser background tabs.
-        """
-        print(f"[PUSH SERVICE][WEB PUSH SIMULATION] Web Push to device token {token[:16] if token else 'local_web'}... payload: {payload.get('type')}", flush=True)
+        return True, "Simulated (No APNs certificate configured)"

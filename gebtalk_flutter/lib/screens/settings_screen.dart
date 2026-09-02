@@ -13,6 +13,7 @@ import 'chat_backup_screen.dart';
 import 'linked_devices_screen.dart';
 import 'payment_screen.dart';
 import 'starred_messages_screen.dart';
+import 'debug_push_screen.dart';
 
 /// Full WhatsApp Settings Screen
 class SettingsScreen extends StatelessWidget {
@@ -170,6 +171,13 @@ class SettingsScreen extends StatelessWidget {
             title: 'Chat Backup',
             subtitle: 'Backup chat history and media to cloud/local',
             destination: const ChatBackupScreen(),
+          ),
+          _buildSettingsTile(
+            context,
+            icon: Icons.notifications_active_rounded,
+            title: 'Push & Calling Diagnostics',
+            subtitle: 'Register device, test background push wake-up & VAPID',
+            destination: const DebugPushScreen(),
           ),
 
           const Padding(

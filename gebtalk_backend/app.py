@@ -2246,6 +2246,35 @@ def unregister_device():
     
     return jsonify({'success': True, 'message': f'Device {device_id} unregistered'})
 
+@app.route('/api/notifications/vapid-public-key', methods=['GET'])
+def get_vapid_public_key():
+    from push_service import VAPID_PUBLIC_KEY
+    return jsonify({'publicKey': VAPID_PUBLIC_KEY})
+
+@app.route('/api/notifications/test', methods=['POST'])
+def send_test_notification():
+    auth_phone = get_authenticated_phone()
+    data = request.json or {}
+    user_id = data.get('user_id') or auth_phone
+    if not user_id:
+        return jsonify({'error': 'Unauthorized / Missing user_id'}), 401
+    
+    profile = get_user_profile(user_id)
+    target_id = profile['id'] if profile else user_id
+    message = data.get('message', 'Push notifications are working properly.')
+    
+    result = PushService.send_test_push(target_id, message, get_db_connection)
+    return jsonify(result)
+
+@app.route('/api/devices/list', methods=['GET'])
+def list_user_devices():
+    user_id = request.args.get('user_id') or get_authenticated_phone()
+    if not user_id:
+        return jsonify({'error': 'Missing user_id'}), 400
+        
+    devices = PushService.get_callee_devices(user_id, get_db_connection)
+    return jsonify({'user_id': user_id, 'devices': devices})
+
 @app.route('/api/calls/create', methods=['POST'])
 def create_call():
     data = request.json or {}

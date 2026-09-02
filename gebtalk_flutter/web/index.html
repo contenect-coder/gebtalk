@@ -24,15 +24,68 @@
 </head>
 <body style="background-color: #0A0F1F; margin: 0; padding: 0;">
   <script>
-    // Force cache purge on update
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (let registration of registrations) {
-          registration.update();
-        }
-      });
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding)
+        .replace(/\-/g, '+')
+        .replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
     }
+
+    window.gebtalkSwRegistration = null;
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js', { scope: '/' })
+        .then(function(reg) {
+          console.log('[GEBTALK] Service Worker sw.js registered with scope:', reg.scope);
+          window.gebtalkSwRegistration = reg;
+        })
+        .catch(function(err) {
+          console.warn('[GEBTALK] sw.js registration failed:', err);
+        });
+    }
+
+    window.getWebPushSubscription = async function() {
+      try {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+        const reg = window.gebtalkSwRegistration || await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        return sub ? JSON.stringify(sub) : null;
+      } catch (e) {
+        console.error('[GEBTALK] Error getting push subscription:', e);
+        return null;
+      }
+    };
+
+    window.subscribeWebPush = async function(vapidPublicKey) {
+      try {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          return JSON.stringify({ error: 'Push not supported by browser' });
+        }
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          return JSON.stringify({ error: 'Notification permission ' + permission });
+        }
+        const reg = window.gebtalkSwRegistration || await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+          });
+        }
+        return JSON.stringify(sub);
+      } catch (e) {
+        console.error('[GEBTALK] Error subscribing to web push:', e);
+        return JSON.stringify({ error: e.toString() });
+      }
+    };
   </script>
-  <script src="flutter_bootstrap.js?v=20260902_03" async></script>
+  <script src="flutter_bootstrap.js?v=20260902_04" async></script>
 </body>
 </html>
