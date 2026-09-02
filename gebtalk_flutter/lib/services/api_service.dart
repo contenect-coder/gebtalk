@@ -18,7 +18,12 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
       if (saved != null && saved.isNotEmpty) {
-        _customBaseUrl = saved;
+        if (saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) {
+          _customBaseUrl = defaultFallbackUrl;
+          prefs.setString('saved_custom_base_url', defaultFallbackUrl);
+        } else {
+          _customBaseUrl = saved;
+        }
       }
     } catch (_) {}
   }
@@ -33,7 +38,12 @@ class ApiService {
   static const String _envApiUrl = String.fromEnvironment('API_URL', defaultValue: '');
 
   static String get baseUrl {
-    if (_customBaseUrl != null) return _customBaseUrl!;
+    if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
+      if (_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) {
+        return defaultFallbackUrl;
+      }
+      return _customBaseUrl!;
+    }
     if (_envApiUrl.isNotEmpty) return _envApiUrl;
     if (kIsWeb) {
       final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
