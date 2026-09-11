@@ -2,6 +2,21 @@
 <html>
 <head>
   <base href="/">
+  <script>
+    (function() {
+      try {
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+          var k = localStorage.key(i);
+          if (k && (k.indexOf('custom_base_url') !== -1 || (localStorage.getItem(k) && localStorage.getItem(k).indexOf('trycloudflare.com') !== -1))) {
+            localStorage.removeItem(k);
+            console.log('[GEBTALK] Cleaned stale tunnel URL from localStorage:', k);
+          }
+        }
+      } catch (e) {
+        console.warn('[GEBTALK] Failed to clean localStorage:', e);
+      }
+    })();
+  </script>
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">

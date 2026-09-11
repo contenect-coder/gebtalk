@@ -10,25 +10,22 @@ import '../utils/error_handler.dart';
 class ApiService {
   static String? authenticatedPhone;
 
-  static const String defaultFallbackUrl = 'https://homeland-hewlett-animated-temp.trycloudflare.com/api';
+  static const String defaultFallbackUrl = 'https://border-campaign-thousand-announcements.trycloudflare.com/api';
   static String? _customBaseUrl;
 
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
-      if (saved != null && saved.isNotEmpty) {
-        if (saved.contains('trycloudflare.com') && saved != defaultFallbackUrl) {
-          _customBaseUrl = defaultFallbackUrl;
-          await prefs.setString('saved_custom_base_url', defaultFallbackUrl);
-        } else if (saved.contains('netlify.app') || saved == '/api') {
-          _customBaseUrl = defaultFallbackUrl;
-          await prefs.setString('saved_custom_base_url', defaultFallbackUrl);
+      if (saved != null) {
+        if (saved.isEmpty || saved.contains('trycloudflare.com') || saved.contains('netlify.app') || saved == '/api') {
+          _customBaseUrl = null;
+          await prefs.remove('saved_custom_base_url');
         } else {
           _customBaseUrl = saved;
         }
       } else {
-        _customBaseUrl = defaultFallbackUrl;
+        _customBaseUrl = null;
       }
     } catch (_) {}
   }
@@ -43,40 +40,41 @@ class ApiService {
   static const String _envApiUrl = String.fromEnvironment('API_URL', defaultValue: '');
 
   static String get baseUrl {
+    if (_envApiUrl.isNotEmpty) return _envApiUrl;
+
     if (kIsWeb) {
       final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
-      // If deployed on netlify or custom domain, ALWAYS connect directly to the active tunnel
-      if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
-        if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty && !_customBaseUrl!.contains('netlify.app')) {
-          if (_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) {
-            return defaultFallbackUrl;
-          }
+      final isLocal = host == 'localhost' || host == '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.');
+
+      if (isLocal) {
+        if (_customBaseUrl != null &&
+            _customBaseUrl!.isNotEmpty &&
+            !_customBaseUrl!.contains('trycloudflare.com') &&
+            !_customBaseUrl!.contains('netlify.app')) {
           return _customBaseUrl!;
         }
-        return defaultFallbackUrl;
+        return 'http://$host:5000/api';
       }
+
+      if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty && !_customBaseUrl!.contains('netlify.app')) {
+        return _customBaseUrl!;
+      }
+      return defaultFallbackUrl.isNotEmpty ? defaultFallbackUrl : '/api';
     }
-    if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
-      if ((_customBaseUrl!.contains('trycloudflare.com') && _customBaseUrl != defaultFallbackUrl) || _customBaseUrl!.contains('netlify.app')) {
-        return defaultFallbackUrl;
-      }
+
+    if (_customBaseUrl != null &&
+        _customBaseUrl!.isNotEmpty &&
+        !_customBaseUrl!.contains('trycloudflare.com') &&
+        !_customBaseUrl!.contains('netlify.app')) {
       return _customBaseUrl!;
     }
-    if (_envApiUrl.isNotEmpty) return _envApiUrl;
-    if (kIsWeb) {
-      final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
-      if (host != 'localhost' && host != '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.')) {
-        return defaultFallbackUrl;
+
+    try {
+      if (Platform.isAndroid) {
+        return 'http://10.0.2.2:5000/api';
       }
-      return 'http://$host:5000/api';
-    } else {
-      try {
-        if (Platform.isAndroid) {
-          return 'http://10.0.2.2:5000/api';
-        }
-      } catch (_) {}
-      return 'http://127.0.0.1:5000/api';
-    }
+    } catch (_) {}
+    return 'http://127.0.0.1:5000/api';
   }
 
   static set baseUrl(String value) {
@@ -244,7 +242,7 @@ class ApiService {
         }),
       ).timeout(const Duration(seconds: 15));
 
-      if (response.statusCode >= 500 && baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && response.statusCode >= 500 && baseUrl != defaultFallbackUrl) {
         final fallbackRes = await http.post(
           Uri.parse('$defaultFallbackUrl/auth/login-email'),
           headers: _authHeaders(json: true),
@@ -274,7 +272,7 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('API Error: $e');
-      if (baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && baseUrl != defaultFallbackUrl) {
         try {
           final fallbackRes = await http.post(
             Uri.parse('$defaultFallbackUrl/auth/login-email'),
@@ -347,7 +345,7 @@ class ApiService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
-      if (response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
         final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
           queryParameters: phone != null ? {'phone': phone} : null,
         );
@@ -359,7 +357,7 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('API Error (getInitData): $e');
-      if (baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && baseUrl != defaultFallbackUrl) {
         try {
           final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
             queryParameters: phone != null ? {'phone': phone} : null,
@@ -430,7 +428,7 @@ class ApiService {
         List data = jsonDecode(response.body);
         return data.map((item) => Contact.fromJson(item)).toList();
       }
-      if (response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
         final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
         if (fallbackRes.statusCode == 200) {
           baseUrl = defaultFallbackUrl;
@@ -440,7 +438,7 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('API Error (getContacts): $e');
-      if (baseUrl != defaultFallbackUrl) {
+      if (defaultFallbackUrl.isNotEmpty && baseUrl != defaultFallbackUrl) {
         try {
           final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
           if (fallbackRes.statusCode == 200) {
