@@ -92,6 +92,13 @@ class WebRtcService extends ChangeNotifier {
     await refreshAudioDiagnostics();
     notifyListeners();
   }
+
+  Future<bool> testSpeaker() async {
+    final success = await WebRtcAudioSink.testSpeaker();
+    await refreshAudioDiagnostics();
+    notifyListeners();
+    return success;
+  }
   
   Map<String, dynamic> _iceConfiguration = {
     'iceServers': [
@@ -529,6 +536,10 @@ class WebRtcService extends ChangeNotifier {
       };
 
       // Handle connection states
+      _peerConnection!.onConnectionState = (state) {
+        debugPrint('[WebRTC][DIAG] PEER CONNECTION STATE: $state');
+      };
+
       _peerConnection!.onIceConnectionState = (state) async {
         final stateName = state.toString().split('.').last.replaceAll('RTCIceConnectionState', '').toUpperCase();
         lastIceConnectionState = stateName;

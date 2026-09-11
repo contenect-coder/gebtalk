@@ -2452,7 +2452,7 @@ def get_incoming_calls():
             created_at = created_at.replace(tzinfo=timezone.utc)
         elapsed = (now - created_at).total_seconds()
         
-        if elapsed > 45:
+        if elapsed > 60:
             cursor.execute("UPDATE webrtc_calls SET status = 'ended' WHERE id = %s", (row['id'],))
             cursor.execute("DELETE FROM webrtc_candidates WHERE call_id = %s", (row['id'],))
             conn.commit()

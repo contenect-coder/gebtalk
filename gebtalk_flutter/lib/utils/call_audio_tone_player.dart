@@ -1,29 +1,28 @@
-import 'call_audio_tone_player_stub.dart'
-    if (dart.library.js_interop) 'call_audio_tone_player_web.dart'
-    if (dart.library.html) 'call_audio_tone_player_web.dart';
+import 'call_audio_manager.dart';
 
+/// Backwards-compatible facade for call tone playing, delegating to CallAudioManager
 class CallAudioTonePlayer {
   static void unlockAudio() {
-    CallAudioTonePlayerImpl.unlockAudio();
+    CallAudioManager.unlockAudio();
   }
 
   static void playOutgoingDialTone() {
-    CallAudioTonePlayerImpl.playOutgoingDialTone();
+    CallAudioManager.startOutgoingDialTone();
   }
 
   static void playIncomingRingtone() {
-    CallAudioTonePlayerImpl.playIncomingRingtone();
+    CallAudioManager.startIncomingRingtone();
   }
 
   static void playCallConnectedChime() {
-    CallAudioTonePlayerImpl.playCallConnectedChime();
+    CallAudioManager.playCallConnectedChime();
   }
 
   static void playCallEndedTone() {
-    CallAudioTonePlayerImpl.playCallEndedTone();
+    CallAudioManager.playCallEndedTone();
   }
 
   static void stopAllTones() {
-    CallAudioTonePlayerImpl.stopAllTones();
+    CallAudioManager.stopRingtone();
   }
 }

@@ -11,6 +11,7 @@ import 'services/webrtc_service.dart';
 import 'services/api_service.dart';
 import 'widgets/call_overlay.dart';
 import 'utils/call_audio_tone_player.dart';
+import 'utils/call_audio_manager.dart';
 import 'dart:ui';
 
 void main() async {
@@ -103,7 +104,14 @@ class GebTalkApp extends StatelessWidget {
 
         final Widget wrappedChild = Stack(
           children: [
-            if (child != null) child,
+            if (child != null)
+              Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (_) {
+                  CallAudioManager.initializeAudio();
+                },
+                child: child,
+              ),
             const CallOverlay(),
           ],
         );

@@ -167,24 +167,84 @@ class _CallOverlayState extends State<CallOverlay> {
                                       _buildDiagRow('SPEAKERPHONE', webrtcService.isSpeakerOn ? 'ON' : 'OFF'),
                                       _buildDiagRow('MUTE', webrtcService.isMuted ? 'ON' : 'OFF'),
                                       _buildDiagRow('AUDIO SESSION', webrtcService.isAudioSessionActive ? 'ACTIVE (VOICE_COMM)' : 'INACTIVE'),
-                                      _buildDiagRow('RINGTONE', webrtcService.isRingtonePlaying ? 'PLAYING' : 'STOPPED'),
-                                      _buildDiagRow('REMOTE AUDIO ELEMENT', webrtcService.remoteAudioElementDiag['elementConnected'] == true ? 'CONNECTED (DOM)' : 'NOT CONNECTED'),
-                                      _buildDiagRow('REMOTE AUDIO ELEMENT STATE', webrtcService.remoteAudioElementDiag['isPlaying'] == true ? 'PLAYING (UNMUTED)' : (webrtcService.remoteAudioElementDiag['isPaused'] == true ? 'PAUSED' : 'WAITING')),
-                                      if (webrtcService.availableAudioOutputs.isNotEmpty) ...[
-                                        const SizedBox(height: 8),
-                                        Center(
-                                          child: TextButton.icon(
-                                            style: TextButton.styleFrom(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                              backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                                      _buildDiagRow('RINGTONE STATE', webrtcService.remoteAudioElementDiag['ringtoneState'] ?? (webrtcService.isRingtonePlaying ? 'PLAYING' : 'STOPPED')),
+                                      if (webrtcService.remoteAudioElementDiag['lastRingtoneError'] != null)
+                                        _buildDiagRow('RINGTONE ERROR', webrtcService.remoteAudioElementDiag['lastRingtoneError'].toString()),
+                                      _buildDiagRow('REMOTE AUDIO ELEMENT', webrtcService.remoteAudioElementDiag['hasSrcObject'] == true ? 'CONNECTED (DOM)' : 'NOT CONNECTED'),
+                                      _buildDiagRow('REMOTE AUDIO STATE', webrtcService.remoteAudioElementDiag['remoteStreamActive'] == true ? 'PLAYING (LIVE)' : (webrtcService.remoteAudioElementDiag['remoteAudioPaused'] == true ? 'PAUSED' : 'WAITING')),
+                                      _buildDiagRow('AUDIO CONTEXT', webrtcService.remoteAudioElementDiag['audioContextState'] ?? 'UNKNOWN'),
+                                      if (webrtcService.remoteAudioElementDiag['lastRemotePlayError'] != null)
+                                        _buildDiagRow('PLAYBACK ERROR', webrtcService.remoteAudioElementDiag['lastRemotePlayError'].toString()),
+                                      _buildDiagRow('SPEAKER TEST', webrtcService.remoteAudioElementDiag['lastTestSpeakerResult'] ?? 'NOT RUN'),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          ElevatedButton.icon(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: AppColors.primary,
+                                              foregroundColor: Colors.black,
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                             ),
-                                            icon: const Icon(Icons.headphones, color: AppColors.primary, size: 14),
-                                            label: const Text('SELECT AUDIO OUTPUT', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold)),
-                                            onPressed: () => _showAudioDeviceDialog(context, webrtcService),
+                                            icon: const Icon(Icons.volume_up, size: 14),
+                                            label: const Text('TEST SPEAKER', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                            onPressed: () async {
+                                              final ok = await webrtcService.testSpeaker();
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(ok ? '✓ Speaker test chime played successfully!' : '⚠ Speaker test failed. Tap screen to unlock audio.'),
+                                                    duration: const Duration(seconds: 2),
+                                                  ),
+                                                );
+                                              }
+                                            },
                                           ),
-                                        ),
-                                      ],
+                                          if (webrtcService.availableAudioOutputs.isNotEmpty) ...[
+                                            const SizedBox(width: 8),
+                                            TextButton.icon(
+                                              style: TextButton.styleFrom(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                              icon: const Icon(Icons.headphones, color: AppColors.primary, size: 14),
+                                              label: const Text('OUTPUT', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.bold)),
+                                              onPressed: () => _showAudioDeviceDialog(context, webrtcService),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (webrtcService.remoteAudioElementDiag['lastRemotePlayError'] != null || webrtcService.remoteAudioElementDiag['isAudioUnlocked'] == false)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8.0),
+                              child: GestureDetector(
+                                onTap: () {
+                                  WebRtcAudioSink.unlockAudio();
+                                  webrtcService.refreshAudioDiagnostics();
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.touch_app, color: Colors.amber, size: 14),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'Call Audio Blocked • Tap To Enable Sound',
+                                        style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600),
+                                      ),
                                     ],
                                   ),
                                 ),
