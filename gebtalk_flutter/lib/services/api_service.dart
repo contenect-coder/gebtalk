@@ -17,13 +17,8 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
-      if (saved != null) {
-        if (saved.isEmpty || saved.contains('trycloudflare.com') || saved.contains('netlify.app') || saved == '/api') {
-          _customBaseUrl = null;
-          await prefs.remove('saved_custom_base_url');
-        } else {
-          _customBaseUrl = saved;
-        }
+      if (saved != null && saved.isNotEmpty && saved != '/api' && !saved.contains('netlify.app')) {
+        _customBaseUrl = saved;
       } else {
         _customBaseUrl = null;
       }
@@ -49,7 +44,6 @@ class ApiService {
       if (isLocal) {
         if (_customBaseUrl != null &&
             _customBaseUrl!.isNotEmpty &&
-            !_customBaseUrl!.contains('trycloudflare.com') &&
             !_customBaseUrl!.contains('netlify.app')) {
           return _customBaseUrl!;
         }
@@ -62,11 +56,16 @@ class ApiService {
       return defaultFallbackUrl.isNotEmpty ? defaultFallbackUrl : '/api';
     }
 
+    // Native Mobile (Android / iOS) or Desktop:
     if (_customBaseUrl != null &&
         _customBaseUrl!.isNotEmpty &&
-        !_customBaseUrl!.contains('trycloudflare.com') &&
         !_customBaseUrl!.contains('netlify.app')) {
       return _customBaseUrl!;
+    }
+
+    // For mobile devices, default directly to the active live server URL:
+    if (defaultFallbackUrl.isNotEmpty) {
+      return defaultFallbackUrl;
     }
 
     try {
