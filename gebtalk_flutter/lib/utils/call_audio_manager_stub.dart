@@ -101,7 +101,12 @@ class CallAudioManagerImpl {
     try {
       await Helper.setSpeakerphoneOn(isSpeaker);
     } catch (e) {
-      debugPrint('[CallAudioManager] setSpeakerphoneOn error: $e');
+      debugPrint('[CallAudioManager] Helper.setSpeakerphoneOn error: $e');
+    }
+    try {
+      await _channel.invokeMethod('setSpeakerphoneOn', {'isSpeaker': isSpeaker});
+    } catch (e) {
+      debugPrint('[CallAudioManager] _channel.setSpeakerphoneOn error: $e');
     }
   }
 

@@ -197,7 +197,7 @@ class MainActivity : FlutterActivity() {
                         @Suppress("DEPRECATION")
                         am.isSpeakerphoneOn = isSpeaker
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {}
             }
 
             mainHandler.postDelayed(reapplyRunnable, 150)
@@ -276,7 +276,7 @@ class MainActivity : FlutterActivity() {
             try {
                 toneGenerator = ToneGenerator(AudioManager.STREAM_RING, 85)
                 toneGenerator?.startTone(ToneGenerator.TONE_CDMA_HIGH_L, -1)
-            } catch (_) {}
+            } catch (e: Exception) {}
         }
     }
 
@@ -288,7 +288,7 @@ class MainActivity : FlutterActivity() {
             mainHandler.postDelayed({
                 try {
                     tg.release()
-                } catch (_) {}
+                } catch (e: Exception) {}
             }, 300)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -303,7 +303,7 @@ class MainActivity : FlutterActivity() {
             mainHandler.postDelayed({
                 try {
                     tg.release()
-                } catch (_) {}
+                } catch (e: Exception) {}
             }, 800)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -319,11 +319,11 @@ class MainActivity : FlutterActivity() {
             toneGenerator?.stopTone()
             toneGenerator?.release()
             toneGenerator = null
-        } catch (_) {}
+        } catch (e: Exception) {}
         try {
             incomingRingtone?.stop()
             incomingRingtone = null
-        } catch (_) {}
+        } catch (e: Exception) {}
     }
 
     override fun onDestroy() {
