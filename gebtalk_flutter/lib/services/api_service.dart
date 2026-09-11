@@ -18,7 +18,12 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
       if (saved != null && saved.isNotEmpty && saved != '/api' && !saved.contains('netlify.app')) {
-        _customBaseUrl = saved;
+        if (!kIsWeb && (saved.contains('10.0.2.2') || saved.contains('127.0.0.1') || saved.contains('localhost'))) {
+          _customBaseUrl = null;
+          await prefs.remove('saved_custom_base_url');
+        } else {
+          _customBaseUrl = saved;
+        }
       } else {
         _customBaseUrl = null;
       }
@@ -59,7 +64,10 @@ class ApiService {
     // Native Mobile (Android / iOS) or Desktop:
     if (_customBaseUrl != null &&
         _customBaseUrl!.isNotEmpty &&
-        !_customBaseUrl!.contains('netlify.app')) {
+        !_customBaseUrl!.contains('netlify.app') &&
+        !_customBaseUrl!.contains('10.0.2.2') &&
+        !_customBaseUrl!.contains('127.0.0.1') &&
+        !_customBaseUrl!.contains('localhost')) {
       return _customBaseUrl!;
     }
 
