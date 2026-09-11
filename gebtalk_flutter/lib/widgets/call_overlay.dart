@@ -1,10 +1,12 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import '../services/webrtc_service.dart';
 import '../theme/colors.dart';
+import '../utils/webrtc_audio_sink.dart';
 
 class CallOverlay extends StatefulWidget {
   const CallOverlay({super.key});
@@ -67,10 +69,17 @@ class _CallOverlayState extends State<CallOverlay> {
               child: ClipRRect(
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.82),
-                    child: SafeArea(
-                      child: Column(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
+                      if (kIsWeb) {
+                        WebRtcAudioSink.unlockAudio();
+                      }
+                    },
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.82),
+                      child: SafeArea(
+                        child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                     // Top Security Badge & Diagnostics Toggle
@@ -294,6 +303,7 @@ class _CallOverlayState extends State<CallOverlay> {
               ),
             ),
           ),
+          ),
         ),
       ),
     ],
@@ -435,7 +445,12 @@ class _CallOverlayState extends State<CallOverlay> {
           label: 'Accept',
           color: const Color(0xFF00C853),
           iconColor: Colors.white,
-          onTap: () => svc.acceptCall(),
+          onTap: () {
+            if (kIsWeb) {
+              WebRtcAudioSink.unlockAudio();
+            }
+            svc.acceptCall();
+          },
         ),
       ],
     ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0);
@@ -496,10 +511,15 @@ class _CallOverlayState extends State<CallOverlay> {
 
         // Speaker Toggle Button
         _buildCircularToggle(
-          icon: svc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
-          label: svc.isSpeakerOn ? 'Speaker' : 'Earpiece',
+          icon: svc.isSpeakerOn ? Icons.volume_up : (kIsWeb ? Icons.headphones : Icons.hearing),
+          label: svc.isSpeakerOn ? 'Speaker' : (kIsWeb ? 'Headset' : 'Earpiece'),
           isActive: svc.isSpeakerOn,
-          onTap: () => svc.toggleSpeaker(),
+          onTap: () {
+            if (kIsWeb) {
+              WebRtcAudioSink.unlockAudio();
+            }
+            svc.toggleSpeaker();
+          },
         ),
       ],
     ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0);
@@ -560,10 +580,15 @@ class _CallOverlayState extends State<CallOverlay> {
 
         // Speaker Toggle Button
         _buildCircularToggle(
-          icon: svc.isSpeakerOn ? Icons.volume_up : Icons.hearing,
-          label: svc.isSpeakerOn ? 'Speaker' : 'Earpiece',
+          icon: svc.isSpeakerOn ? Icons.volume_up : (kIsWeb ? Icons.headphones : Icons.hearing),
+          label: svc.isSpeakerOn ? 'Speaker' : (kIsWeb ? 'Headset' : 'Earpiece'),
           isActive: svc.isSpeakerOn,
-          onTap: () => svc.toggleSpeaker(),
+          onTap: () {
+            if (kIsWeb) {
+              WebRtcAudioSink.unlockAudio();
+            }
+            svc.toggleSpeaker();
+          },
         ),
       ],
     ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0);

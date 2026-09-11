@@ -37,7 +37,7 @@ class WebRtcService extends ChangeNotifier {
   bool _isRendererInitialized = false;
 
   bool isMuted = false;
-  bool isSpeakerOn = false;
+  bool isSpeakerOn = kIsWeb;
 
   Timer? _incomingPollTimer;
   Timer? _signalingPollTimer;
@@ -336,8 +336,8 @@ class WebRtcService extends ChangeNotifier {
                 }).catchError((_) {});
               }
 
-              // Default to top earpiece receiver speaker
-              await _applyAudioRouting(false);
+              // Default to loudspeaker on Web (browsers have no access to physical top earpiece), or top earpiece on native mobile
+              await _applyAudioRouting(kIsWeb ? true : false);
               
               callState = 'connected';
               statusMessage = null;
@@ -851,8 +851,8 @@ class WebRtcService extends ChangeNotifier {
           }).catchError((_) {});
         }
 
-        // Default to top earpiece receiver speaker
-        await _applyAudioRouting(false);
+        // Default to loudspeaker on Web (browsers have no access to physical top earpiece), or top earpiece on native mobile
+        await _applyAudioRouting(kIsWeb ? true : false);
 
         callState = 'connected';
         statusMessage = null;
@@ -1004,7 +1004,7 @@ class WebRtcService extends ChangeNotifier {
     currentPeerAvatar = null;
     isCaller = false;
     isMuted = false;
-    isSpeakerOn = false;
+    isSpeakerOn = kIsWeb;
 
     notifyListeners();
     _startIncomingCallPolling(); // Resume listening for incoming calls

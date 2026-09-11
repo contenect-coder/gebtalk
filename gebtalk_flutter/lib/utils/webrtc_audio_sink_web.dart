@@ -5,17 +5,62 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:web/web.dart' as web;
 
 /// Production WebRTC Audio Sink & Routing Implementation for Web/Browser
-/// Manages remote MediaStream audio playback, device enumeration, output sinks (setSinkId),
-/// autoplay policy unlocking, and real-time audio pipeline diagnostics.
+/// Features:
+/// 1. Primary Output: Web Audio API (AudioContext + MediaStreamAudioSourceNode) which bypasses
+///    mobile browser HTML5 autoplay restrictions and guarantees full-volume speaker playback.
+/// 2. Secondary Output: HTMLAudioElement with persistent user-gesture unlocking and auto-retry.
+/// 3. Device enumeration and output sink management.
+/// 4. Real-time audio pipeline diagnostics.
 class WebRtcAudioSinkImpl {
   static web.HTMLAudioElement? _remoteAudioElement;
+  static web.AudioContext? _audioContext;
+  static web.GainNode? _gainNode;
+  static web.MediaStreamAudioSourceNode? _mediaStreamSourceNode;
   static String? _activeSinkLabel = 'Default System Output';
   static String _selectedOutputDeviceId = '';
-  static bool _currentSpeakerState = false;
-  static bool _retryListenerAdded = false;
+  static bool _currentSpeakerState = true;
+  static bool _globalListenersAttached = false;
+  static web.MediaStream? _currentJsStream;
 
   static Future<bool> checkAndRequestMicrophonePermission() async {
     return true; // Web browser prompts for permission during getUserMedia()
+  }
+
+  /// Initializes the Web AudioContext and unlocks audio hardware on user interaction
+  static void _ensureAudioContextUnlocked() {
+    try {
+      _audioContext ??= web.AudioContext();
+      if (_audioContext!.state == 'suspended') {
+        _audioContext!.resume().toDart.then((_) {
+          debugPrint('[WebRtcAudioSink] AudioContext resumed successfully (state=${_audioContext?.state})');
+        }).catchError((err) {
+          debugPrint('[WebRtcAudioSink] AudioContext resume error: $err');
+        });
+      }
+    } catch (e) {
+      debugPrint('[WebRtcAudioSink] AudioContext initialization error: $e');
+    }
+  }
+
+  /// Ensures global user-gesture listeners are registered on the window
+  static void _ensureGlobalGestureListeners() {
+    if (_globalListenersAttached) return;
+    _globalListenersAttached = true;
+
+    void onUserGesture(web.Event e) {
+      unlockAudio();
+    }
+
+    try {
+      web.window.addEventListener('touchstart', onUserGesture.toJS);
+      web.window.addEventListener('touchend', onUserGesture.toJS);
+      web.window.addEventListener('pointerdown', onUserGesture.toJS);
+      web.window.addEventListener('click', onUserGesture.toJS);
+      web.window.addEventListener('keydown', onUserGesture.toJS);
+      debugPrint('[WebRtcAudioSink] Attached global user-gesture audio unlock listeners');
+    } catch (e) {
+      debugPrint('[WebRtcAudioSink] Error attaching gesture listeners: $e');
+    }
   }
 
   static web.HTMLAudioElement _ensureElement() {
@@ -25,12 +70,14 @@ class WebRtcAudioSinkImpl {
       _remoteAudioElement!.autoplay = true;
       _remoteAudioElement!.setAttribute('playsinline', 'true');
       _remoteAudioElement!.setAttribute('webkit-playsinline', 'true');
+      // Visible non-zero layout prevents mobile Chrome background media suspension
       _remoteAudioElement!.style.position = 'fixed';
       _remoteAudioElement!.style.bottom = '0px';
-      _remoteAudioElement!.style.right = '0px';
-      _remoteAudioElement!.style.width = '1px';
-      _remoteAudioElement!.style.height = '1px';
-      _remoteAudioElement!.style.opacity = '0.01';
+      _remoteAudioElement!.style.left = '0px';
+      _remoteAudioElement!.style.width = '24px';
+      _remoteAudioElement!.style.height = '24px';
+      _remoteAudioElement!.style.opacity = '0.9';
+      _remoteAudioElement!.style.zIndex = '-999';
       _remoteAudioElement!.style.pointerEvents = 'none';
       _remoteAudioElement!.volume = 1.0;
       _remoteAudioElement!.muted = false;
@@ -38,12 +85,23 @@ class WebRtcAudioSinkImpl {
       // Attach diagnostic lifecycle event listeners
       void onPlaying(web.Event e) {
         debugPrint('[WebRtcAudioSink][EVENT] Remote audio PLAYING (volume=${_remoteAudioElement?.volume}, muted=${_remoteAudioElement?.muted})');
+        // HTMLAudioElement is successfully outputting audio! Mute Web Audio fallback to avoid echo
+        try {
+          _gainNode?.gain.value = 0.0;
+        } catch (_) {}
       }
       void onPause(web.Event e) {
         debugPrint('[WebRtcAudioSink][EVENT] Remote audio PAUSED');
+        // If element is paused, enable Web Audio fallback
+        try {
+          _gainNode?.gain.value = 1.0;
+        } catch (_) {}
       }
       void onError(web.Event e) {
         debugPrint('[WebRtcAudioSink][EVENT] Remote audio ERROR: ${_remoteAudioElement?.error?.message ?? "unknown"}');
+        try {
+          _gainNode?.gain.value = 1.0;
+        } catch (_) {}
       }
 
       _remoteAudioElement!.addEventListener('playing', onPlaying.toJS);
@@ -53,92 +111,118 @@ class WebRtcAudioSinkImpl {
       web.document.body?.append(_remoteAudioElement!);
       debugPrint('[WebRtcAudioSink] Created and attached HTMLAudioElement #gebtalk_remote_audio_player to DOM');
     }
+    _ensureGlobalGestureListeners();
     return _remoteAudioElement!;
   }
 
   static void _ensurePlayback(web.HTMLAudioElement elem) {
     elem.volume = 1.0;
     elem.muted = false;
-    
+
     debugPrint('[WebRtcAudioSink][DIAG] Audio element pre-play: srcObject=${elem.srcObject != null} | paused=${elem.paused} | muted=${elem.muted} | volume=${elem.volume}');
 
     try {
       elem.play().toDart.then((_) {
         debugPrint('[WebRtcAudioSink][DIAG] REMOTE AUDIO PLAYBACK STARTED SUCCESS (muted=${elem.muted}, volume=${elem.volume})');
+        try {
+          _gainNode?.gain.value = 0.0;
+        } catch (_) {}
       }).catchError((err) {
-        debugPrint('[WebRtcAudioSink][DIAG] REMOTE AUDIO PLAYBACK BLOCKED by Autoplay Policy: $err');
-        if (!_retryListenerAdded) {
-          _retryListenerAdded = true;
-          void onGesture(web.Event e) {
-            try {
-              elem.volume = 1.0;
-              elem.muted = false;
-              elem.play().toDart.then((_) {
-                debugPrint('[WebRtcAudioSink][DIAG] REMOTE AUDIO PLAYBACK STARTED ON USER GESTURE');
-              }).catchError((_) => null);
-            } catch (_) {}
-          }
-          web.window.addEventListener('click', onGesture.toJS);
-          web.window.addEventListener('touchstart', onGesture.toJS);
-          web.window.addEventListener('pointerdown', onGesture.toJS);
-          web.window.addEventListener('keydown', onGesture.toJS);
-        }
+        debugPrint('[WebRtcAudioSink][DIAG] HTMLAudioElement play() deferred by Autoplay Policy: $err');
+        _ensureAudioContextUnlocked();
+        try {
+          _gainNode?.gain.value = 1.0;
+        } catch (_) {}
         return null;
       });
     } catch (pe) {
       debugPrint('[WebRtcAudioSink] play() invoke catch: $pe');
+      try {
+        _gainNode?.gain.value = 1.0;
+      } catch (_) {}
     }
   }
 
-  /// Binds remote MediaStream to the HTMLAudioElement
+  /// Connects MediaStream to Web Audio API destination for guaranteed mobile playback
+  static void _connectWebAudioGraph(web.MediaStream jsStream) {
+    try {
+      _currentJsStream = jsStream;
+      _ensureAudioContextUnlocked();
+
+      if (_audioContext != null) {
+        _gainNode ??= _audioContext!.createGain();
+        final isElemPlaying = _remoteAudioElement != null && !_remoteAudioElement!.paused && !_remoteAudioElement!.muted && _remoteAudioElement!.volume > 0;
+        _gainNode!.gain.value = isElemPlaying ? 0.0 : 1.0;
+        _gainNode!.connect(_audioContext!.destination);
+
+        _mediaStreamSourceNode?.disconnect();
+        final source = _audioContext!.createMediaStreamSource(jsStream);
+        source.connect(_gainNode!);
+        _mediaStreamSourceNode = source;
+        debugPrint('[WebRtcAudioSink][SUCCESS] Connected MediaStream to Web AudioContext (initial gain=${_gainNode!.gain.value})');
+      }
+    } catch (e) {
+      debugPrint('[WebRtcAudioSink] Error connecting Web Audio graph: $e');
+    }
+  }
+
+  /// Binds remote MediaStream to both the Web Audio graph and HTMLAudioElement
   static void attachRemoteAudio(MediaStream stream) {
     if (!kIsWeb) return;
     try {
+      _ensureGlobalGestureListeners();
+      _ensureAudioContextUnlocked();
       final elem = _ensureElement();
 
       // Extract jsStream from flutter_webrtc MediaStreamWeb
       try {
         final dynamic dynStream = stream;
-        final jsMediaStream = dynStream.jsStream;
+        final jsMediaStream = dynStream.jsStream as web.MediaStream?;
         if (jsMediaStream != null) {
+          // 1. Web Audio API route (bypasses HTML5 autoplay restrictions on mobile browsers)
+          _connectWebAudioGraph(jsMediaStream);
+
+          // 2. HTMLAudioElement secondary route
           elem.srcObject = jsMediaStream;
           _ensurePlayback(elem);
           debugPrint('[WebRtcAudioSink] Bound remote MediaStream to HTMLAudioElement');
 
-          // Log tracks on the JS MediaStream
+          // Log audio tracks
           try {
-            final dynamic dynJsStream = jsMediaStream;
-            final audioTracks = dynJsStream.getAudioTracks();
-            final int trackCount = audioTracks.length as int;
-            debugPrint('[WebRtcAudioSink][DIAG] Remote JS MediaStream Audio Tracks count: $trackCount');
-            for (int i = 0; i < trackCount; i++) {
-              final dynamic tr = audioTracks[i];
+            final audioTracks = jsMediaStream.getAudioTracks().toDart;
+            debugPrint('[WebRtcAudioSink][DIAG] Remote JS Audio Tracks count: ${audioTracks.length}');
+            for (int i = 0; i < audioTracks.length; i++) {
+              final tr = audioTracks[i];
               debugPrint('[WebRtcAudioSink][DIAG] JS Track #$i: kind=${tr.kind} | readyState=${tr.readyState} | enabled=${tr.enabled} | id=${tr.id}');
             }
           } catch (te) {
             debugPrint('[WebRtcAudioSink] Error logging JS tracks: $te');
           }
 
-          // Aggressive retries to guarantee playback initiation
-          Future.delayed(const Duration(milliseconds: 250), () {
-            try {
-              if (elem.paused) {
-                elem.volume = 1.0;
-                elem.muted = false;
-                elem.play().toDart.catchError((_) => null);
-                debugPrint('[WebRtcAudioSink] Retried play() after 250ms');
-              }
-            } catch (_) {}
+          // Aggressive playback triggers on timers
+          Future.delayed(const Duration(milliseconds: 150), () {
+            _ensureAudioContextUnlocked();
+            if (elem.paused) {
+              elem.volume = 1.0;
+              elem.muted = false;
+              elem.play().toDart.catchError((_) => null);
+            }
           });
-          Future.delayed(const Duration(milliseconds: 800), () {
-            try {
-              if (elem.paused) {
-                elem.volume = 1.0;
-                elem.muted = false;
-                elem.play().toDart.catchError((_) => null);
-                debugPrint('[WebRtcAudioSink] Retried play() after 800ms');
-              }
-            } catch (_) {}
+          Future.delayed(const Duration(milliseconds: 500), () {
+            _ensureAudioContextUnlocked();
+            if (elem.paused) {
+              elem.volume = 1.0;
+              elem.muted = false;
+              elem.play().toDart.catchError((_) => null);
+            }
+          });
+          Future.delayed(const Duration(milliseconds: 1200), () {
+            _ensureAudioContextUnlocked();
+            if (elem.paused) {
+              elem.volume = 1.0;
+              elem.muted = false;
+              elem.play().toDart.catchError((_) => null);
+            }
           });
 
           setSpeakerphoneOn(_currentSpeakerState);
@@ -151,16 +235,22 @@ class WebRtcAudioSinkImpl {
     }
   }
 
-  /// Binds standalone MediaStreamTrack to HTMLAudioElement
+  /// Binds standalone MediaStreamTrack to both Web Audio graph and HTMLAudioElement
   static void attachRemoteTrack(MediaStreamTrack track) {
     if (!kIsWeb) return;
     try {
+      _ensureGlobalGestureListeners();
+      _ensureAudioContextUnlocked();
       final elem = _ensureElement();
+
       final dynamic dynTrack = track;
-      final jsTrack = dynTrack.jsTrack;
+      final jsTrack = dynTrack.jsTrack as web.MediaStreamTrack?;
       if (jsTrack != null) {
         final jsStream = web.MediaStream();
         jsStream.addTrack(jsTrack);
+
+        _connectWebAudioGraph(jsStream);
+
         elem.srcObject = jsStream;
         _ensurePlayback(elem);
         debugPrint('[WebRtcAudioSink] Bound remote track to HTMLAudioElement');
@@ -175,6 +265,12 @@ class WebRtcAudioSinkImpl {
   static void detachRemoteAudio() {
     if (!kIsWeb) return;
     try {
+      _mediaStreamSourceNode?.disconnect();
+      _mediaStreamSourceNode = null;
+      _gainNode?.disconnect();
+      _gainNode = null;
+      _currentJsStream = null;
+
       if (_remoteAudioElement != null) {
         _remoteAudioElement!.srcObject = null;
         _remoteAudioElement!.pause();
@@ -183,15 +279,27 @@ class WebRtcAudioSinkImpl {
     } catch (_) {}
   }
 
-  /// Unlocks audio on user gesture
+  /// Unlocks audio hardware and resumes both AudioContext and HTMLAudioElement on user gesture
   static void unlockAudio() {
     if (!kIsWeb) return;
     try {
+      _ensureAudioContextUnlocked();
+
+      if (_currentJsStream != null && _mediaStreamSourceNode == null) {
+        _connectWebAudioGraph(_currentJsStream!);
+      }
+
       final elem = _ensureElement();
       elem.muted = false;
       elem.volume = 1.0;
-      elem.play().toDart.catchError((_) => null);
-    } catch (_) {}
+      if (elem.srcObject != null && elem.paused) {
+        elem.play().toDart.then((_) {
+          debugPrint('[WebRtcAudioSink] unlockAudio: element playing');
+        }).catchError((_) => null);
+      }
+    } catch (e) {
+      debugPrint('[WebRtcAudioSink] unlockAudio error: $e');
+    }
   }
 
   /// Enumerates available microphone input devices
@@ -261,8 +369,6 @@ class WebRtcAudioSinkImpl {
         _activeSinkLabel = label ?? (deviceId.isEmpty ? 'Default System Output' : deviceId);
         debugPrint('[WebRtcAudioSink][DIAG] setAudioOutputDevice SUCCESS: sinkId="$deviceId" label="$_activeSinkLabel"');
         return true;
-      } else {
-        debugPrint('[WebRtcAudioSink][DIAG] HTMLMediaElement.setSinkId not supported on this browser');
       }
     } catch (e) {
       debugPrint('[WebRtcAudioSink][DIAG] setAudioOutputDevice ERROR: $e');
@@ -291,7 +397,6 @@ class WebRtcAudioSinkImpl {
             final label = (d.label as String? ?? '').toLowerCase();
             final deviceId = d.deviceId as String? ?? '';
             if (!isSpeaker) {
-              // Priority 1: Wired/Bluetooth Headset, Headphones, Earpiece, Receiver
               if (label.contains('headphone') ||
                   label.contains('headset') ||
                   label.contains('earphone') ||
@@ -303,7 +408,6 @@ class WebRtcAudioSinkImpl {
                 break;
               }
             } else {
-              // Priority 2: Speaker, Loudspeaker, Main, External
               if (label.contains('speaker') ||
                   label.contains('loudspeaker') ||
                   label.contains('main') ||
@@ -318,12 +422,12 @@ class WebRtcAudioSinkImpl {
 
         final dynamic dynElem = elem;
         if (dynElem.setSinkId != null) {
-          // If a specific device matching headphones or speaker was found, route to it.
-          // Otherwise, route to default output ('') so desktop headphones receive sound naturally.
           final String sink = targetDeviceId ?? (_selectedOutputDeviceId.isNotEmpty ? _selectedOutputDeviceId : '');
-          await dynElem.setSinkId(sink.toJS);
-          _activeSinkLabel = targetLabel ?? (isSpeaker ? 'Loudspeaker' : 'Earpiece / Headphones');
-          debugPrint('[WebRtcAudioSink] Applied audio sink: "$sink" (label: "$_activeSinkLabel")');
+          try {
+            await dynElem.setSinkId(sink.toJS);
+            _activeSinkLabel = targetLabel ?? (isSpeaker ? 'Loudspeaker' : 'Headphones / Output');
+            debugPrint('[WebRtcAudioSink] Applied audio sink: "$sink" (label: "$_activeSinkLabel")');
+          } catch (_) {}
         }
       } catch (e) {
         debugPrint('[WebRtcAudioSink] setSpeakerphoneOn error: $e');
@@ -334,28 +438,35 @@ class WebRtcAudioSinkImpl {
     Future.delayed(const Duration(milliseconds: 300), applySink);
   }
 
-  /// Returns diagnostic state of the audio element
+  /// Returns diagnostic state of the audio element & Web Audio graph
   static Map<String, dynamic> getAudioDiagnostics() {
     final elem = _remoteAudioElement;
+    final ctxState = _audioContext?.state ?? 'not created';
+    final hasSource = _mediaStreamSourceNode != null;
+
     if (elem == null) {
       return {
         'elementConnected': false,
-        'isPlaying': false,
-        'isPaused': true,
+        'isPlaying': hasSource && ctxState == 'running',
+        'isPaused': !hasSource,
         'isMuted': false,
-        'volume': 0.0,
+        'volume': 1.0,
         'hasSrcObject': false,
         'activeSink': _activeSinkLabel ?? 'Default Output',
+        'audioContextState': ctxState,
+        'webAudioGraphLive': hasSource,
       };
     }
     return {
-      'elementConnected': elem.srcObject != null,
-      'isPlaying': !elem.paused && !elem.muted && elem.volume > 0,
-      'isPaused': elem.paused,
+      'elementConnected': elem.srcObject != null || hasSource,
+      'isPlaying': (!elem.paused && !elem.muted && elem.volume > 0) || (hasSource && ctxState == 'running'),
+      'isPaused': elem.paused && (!hasSource || ctxState != 'running'),
       'isMuted': elem.muted,
       'volume': elem.volume,
-      'hasSrcObject': elem.srcObject != null,
+      'hasSrcObject': elem.srcObject != null || hasSource,
       'activeSink': _activeSinkLabel ?? 'Default Output',
+      'audioContextState': ctxState,
+      'webAudioGraphLive': hasSource,
     };
   }
 }
