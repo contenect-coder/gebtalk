@@ -39,8 +39,8 @@ class ApiService {
     if (current.isNotEmpty && !list.contains(current)) {
       list.add(current);
     }
-    // 3. Local URL as secondary fallback
-    if (defaultLocalUrl.isNotEmpty && !list.contains(defaultLocalUrl)) {
+    // 3. Local URL as secondary fallback ONLY for web
+    if (kIsWeb && defaultLocalUrl.isNotEmpty && !list.contains(defaultLocalUrl)) {
       list.add(defaultLocalUrl);
     }
     return list;
@@ -51,7 +51,14 @@ class ApiService {
       var target = url.trim();
       if (target.endsWith('/')) target = target.substring(0, target.length - 1);
       if (!target.endsWith('/api')) target = '$target/api';
-      final res = await _client.get(Uri.parse('$target/health')).timeout(const Duration(seconds: 4));
+      final res = await _client.get(
+        Uri.parse('$target/health'),
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+          'bypass-tunnel-reminder': 'true',
+          'User-Agent': 'GEBTALK-Client',
+        },
+      ).timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -63,30 +70,22 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
       if (saved != null && saved.isNotEmpty) {
-        // On mobile: ONLY keep the saved URL if it exactly matches
-        // the current live tunnel. Purge everything else (local IPs,
-        // expired tunnels, netlify proxies, etc.)
         if (!kIsWeb) {
+          // On mobile: Purge any old trycloudflare, netlify, or local IPs
           if (saved == defaultFallbackUrl) {
             _customBaseUrl = saved;
-          } else if (saved.contains('trycloudflare.com') &&
-              !saved.contains(defaultFallbackUrl.split('//').last.split('/').first)) {
-            // Expired/old Cloudflare tunnel — purge
-            _customBaseUrl = null;
-            await prefs.remove('saved_custom_base_url');
-            debugPrint('[ApiService] Purged stale tunnel URL: $saved');
-          } else if (saved.contains('192.168.') ||
+          } else if (saved.contains('trycloudflare.com') ||
+              saved.contains('192.168.') ||
               saved.contains('10.0.') ||
               saved.contains('10.0.2.2') ||
               saved.contains('127.0.0.1') ||
               saved.contains('localhost') ||
               saved.contains('netlify.app')) {
-            // Local/private IP or netlify proxy — purge
             _customBaseUrl = null;
             await prefs.remove('saved_custom_base_url');
-            debugPrint('[ApiService] Purged local/invalid URL: $saved');
+            debugPrint('[ApiService] Purged stale URL: $saved');
           } else {
-            // User-configured non-local URL (e.g. their own VPS) — keep it
+            // Valid custom non-local server configured by user
             _customBaseUrl = saved;
           }
         } else {
@@ -191,11 +190,12 @@ class ApiService {
     } catch (_) {}
   }
 
-  static Map<String, String> _authHeaders({bool json = false}) {
+  static Map<String, String> authHeaders({bool json = false}) {
     final headers = <String, String>{
       'Bypass-Tunnel-Reminder': 'true',
       'bypass-tunnel-reminder': 'true',
       'ngrok-skip-browser-warning': 'true',
+      'User-Agent': 'GEBTALK-Client',
     };
     if (json) headers['Content-Type'] = 'application/json';
     if (authenticatedPhone != null) {
@@ -204,6 +204,8 @@ class ApiService {
     }
     return headers;
   }
+
+  static Map<String, String> _authHeaders({bool json = false}) => authHeaders(json: json);
 
   static String resolveUrl(String url) {
     if (!url.startsWith('http')) return url;
@@ -272,7 +274,7 @@ class ApiService {
     try {
       final response = await _client.post(
         Uri.parse('$baseUrl/auth/send-otp'),
-        headers: {'Content-Type': 'application/json'},
+        headers: authHeaders(json: true),
         body: jsonEncode({'phone': phone}),
       ).timeout(const Duration(seconds: 30));
       final data = _parseJsonResponse(response, defaultErrorMessage: 'Failed to send OTP');
@@ -291,7 +293,7 @@ class ApiService {
     try {
       final response = await _client.post(
         Uri.parse('$baseUrl/auth/send-email-otp'),
-        headers: {'Content-Type': 'application/json'},
+        headers: authHeaders(json: true),
         body: jsonEncode({'email': email, 'name': name}),
       ).timeout(const Duration(seconds: 30));
       final data = _parseJsonResponse(response, defaultErrorMessage: 'Failed to send Email OTP');
@@ -310,7 +312,7 @@ class ApiService {
     try {
       final response = await _client.post(
         Uri.parse('$baseUrl/auth/verify-email-otp'),
-        headers: {'Content-Type': 'application/json'},
+        headers: authHeaders(json: true),
         body: jsonEncode({
           'email': email,
           'otp': otp,
@@ -342,14 +344,14 @@ class ApiService {
         debugPrint('[ApiService] Attempting email login to: $target/auth/login-email');
         final response = await _client.post(
           Uri.parse('$target/auth/login-email'),
-          headers: _authHeaders(json: true),
+          headers: authHeaders(json: true),
           body: jsonEncode({
             'identifier': cleanId,
             'email': cleanId,
             'username': cleanId,
             'password': password,
           }),
-        ).timeout(const Duration(seconds: 8));
+        ).timeout(const Duration(seconds: 10));
 
         debugPrint('[ApiService] Response from $target: ${response.statusCode}');
 
@@ -365,9 +367,18 @@ class ApiService {
             return data;
           }
         } else if (response.statusCode == 401 || response.statusCode == 403) {
+          try {
+            final errBody = jsonDecode(response.body);
+            if (errBody is Map && errBody['error'] != null) {
+              lastDetailedError = errBody['error'].toString();
+            } else {
+              lastDetailedError = 'Invalid username/email or password';
+            }
+          } catch (_) {
+            lastDetailedError = 'Invalid username/email or password';
+          }
           lastAuthError = 'AUTH_FAILED';
-          lastDetailedError = 'Invalid username/email or password';
-          ErrorHandler.showError('Invalid username or password');
+          ErrorHandler.showError(lastDetailedError ?? 'Invalid username or password');
           return null;
         } else {
           lastErr = 'HTTP ${response.statusCode} from $target: ${response.body.isNotEmpty ? response.body : "No content"}';
@@ -395,7 +406,7 @@ class ApiService {
     try {
       final response = await _client.post(
         Uri.parse('$baseUrl/auth/verify-otp'),
-        headers: {'Content-Type': 'application/json'},
+        headers: authHeaders(json: true),
         body: jsonEncode({
           'phone': phone,
           'otp': otp,

@@ -621,7 +621,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
               const SizedBox(height: 8),
               const Text(
-                'v1.0.3+4 (Release Build)',
+                'v1.0.6 (Permanent Server)',
                 style: TextStyle(color: Colors.white30, fontSize: 10, letterSpacing: 1),
               ),
             ],

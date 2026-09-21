@@ -56,6 +56,9 @@ class WebRtcService extends ChangeNotifier {
   List<Map<String, String>> availableAudioOutputs = [];
   Map<String, dynamic> remoteAudioElementDiag = {};
 
+  Map<String, String> get _getHeaders => ApiService.authHeaders(json: false);
+  Map<String, String> get _jsonHeaders => ApiService.authHeaders(json: true);
+
   bool get hasLocalAudioTrack => localStream != null && localStream!.getAudioTracks().isNotEmpty;
   bool get hasRemoteAudioTrack => remoteStream != null && remoteStream!.getAudioTracks().isNotEmpty;
   String get audioOutputMode => isSpeakerOn ? 'SPEAKER' : 'EARPIECE';
@@ -201,7 +204,7 @@ class WebRtcService extends ChangeNotifier {
     try {
       final res = await ApiService.client.get(
         Uri.parse('${ApiService.baseUrl}/calls/config'),
-        headers: {'User-Agent': 'GEBTALK-Client'},
+        headers: _getHeaders,
       );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -254,7 +257,7 @@ class WebRtcService extends ChangeNotifier {
       try {
         final response = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/incoming?callee_id=$currentUserId'),
-          headers: {'User-Agent': 'GEBTALK-Client'},
+          headers: _getHeaders,
         );
         if (response.statusCode == 200 && response.body != 'null' && response.body.isNotEmpty) {
           final data = json.decode(response.body);
@@ -307,7 +310,7 @@ class WebRtcService extends ChangeNotifier {
         // 1. Check status of call
         final statusRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/status?call_id=$currentCallId'),
-          headers: {'User-Agent': 'GEBTALK-Client'},
+          headers: _getHeaders,
         );
         
         if (statusRes.statusCode == 200) {
@@ -400,7 +403,7 @@ class WebRtcService extends ChangeNotifier {
         // 2. Fetch remote ICE candidates
         final iceRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/ice-candidates?call_id=$currentCallId&exclude_sender_id=$currentUserId'),
-          headers: {'User-Agent': 'GEBTALK-Client'},
+          headers: _getHeaders,
         );
         
         if (iceRes.statusCode == 200) {
@@ -471,7 +474,7 @@ class WebRtcService extends ChangeNotifier {
       });
       await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/ice-candidate'),
-        headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+        headers: _jsonHeaders,
         body: json.encode({
           'call_id': int.parse(currentCallId!),
           'sender_id': currentUserId,
@@ -852,7 +855,7 @@ class WebRtcService extends ChangeNotifier {
 
       final response = await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/create'),
-        headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+        headers: _jsonHeaders,
         body: json.encode({
           'caller_id': currentUserId,
           'callee_id': targetSignalingId,
@@ -924,7 +927,7 @@ class WebRtcService extends ChangeNotifier {
       if (offerSdp == null || offerSdp.isEmpty) {
         final statusRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/status?call_id=$currentCallId'),
-          headers: {'User-Agent': 'GEBTALK-Client'},
+          headers: _getHeaders,
         );
         
         if (statusRes.statusCode == 200) {
@@ -984,7 +987,7 @@ class WebRtcService extends ChangeNotifier {
 
       final acceptRes = await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/accept'),
-        headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+        headers: _jsonHeaders,
         body: json.encode({
           'call_id': int.parse(currentCallId!),
           'sdp_answer': finalAnswer.sdp,
@@ -1072,7 +1075,7 @@ class WebRtcService extends ChangeNotifier {
         try {
           await ApiService.client.post(
             Uri.parse('${ApiService.baseUrl}/calls/end'),
-            headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
+            headers: _jsonHeaders,
             body: json.encode({
               'call_id': int.parse(tempCallId),
               'duration': tempDuration,

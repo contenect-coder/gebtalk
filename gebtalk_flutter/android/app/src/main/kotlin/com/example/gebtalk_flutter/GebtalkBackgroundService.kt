@@ -267,6 +267,8 @@ class GebtalkBackgroundService : Service() {
             conn.connectTimeout = 4000
             conn.readTimeout = 4000
             conn.setRequestProperty("User-Agent", "GEBTALK-Android-Background")
+            conn.setRequestProperty("ngrok-skip-browser-warning", "true")
+            conn.setRequestProperty("bypass-tunnel-reminder", "true")
 
             val token = prefs?.getString(PREF_AUTH_TOKEN, null)
             if (!token.isNullOrEmpty()) {
