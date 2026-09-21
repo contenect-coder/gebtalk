@@ -14,6 +14,7 @@ import 'linked_devices_screen.dart';
 import 'payment_screen.dart';
 import 'starred_messages_screen.dart';
 import 'debug_push_screen.dart';
+import 'settings/server_settings_screen.dart';
 
 /// Full WhatsApp Settings Screen
 class SettingsScreen extends StatelessWidget {
@@ -178,6 +179,13 @@ class SettingsScreen extends StatelessWidget {
             title: 'Push & Calling Diagnostics',
             subtitle: 'Register device, test background push wake-up & VAPID',
             destination: const DebugPushScreen(),
+          ),
+          _buildSettingsTile(
+            context,
+            icon: Icons.dns_rounded,
+            title: 'Server Connection',
+            subtitle: 'Change live tunnel URL or switch to local Wi-Fi backend',
+            destination: const ServerSettingsScreen(),
           ),
 
           const Padding(

@@ -49,7 +49,7 @@ class _CallOverlayState extends State<CallOverlay> {
         color: Colors.transparent,
         child: Stack(
           children: [
-            if (webrtcService.remoteStream != null)
+            if (webrtcService.remoteStream != null && webrtcService.remoteStream!.getVideoTracks().isNotEmpty)
               Positioned(
                 bottom: 0,
                 right: 0,
@@ -157,6 +157,7 @@ class _CallOverlayState extends State<CallOverlay> {
                                       ),
                                       const SizedBox(height: 6),
                                       _buildDiagRow('CALL STATE', state.toUpperCase()),
+                                      _buildDiagRow('ICE CONNECTION', webrtcService.lastIceConnectionState),
                                       _buildDiagRow('LOCAL AUDIO TRACK', webrtcService.localTrackState),
                                       _buildDiagRow('REMOTE AUDIO TRACK', webrtcService.hasRemoteAudioTrack ? 'FOUND' : 'NOT FOUND'),
                                       _buildDiagRow('REMOTE TRACK STATE', webrtcService.remoteTrackState),

@@ -9,6 +9,7 @@ import '../widgets/animations.dart';
 import '../theme/colors.dart';
 import 'home_screen.dart';
 import '../services/api_service.dart';
+import '../utils/error_handler.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({Key? key}) : super(key: key);
@@ -150,7 +151,9 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     } else {
       setState(() {
         if (ApiService.lastAuthError == 'SERVER_ERROR' || ApiService.lastAuthError == 'NETWORK_ERROR') {
-          _errorMessage = 'SERVER OFFLINE - CHECK SETTINGS (⚙️)';
+          _errorMessage = ApiService.lastDetailedError != null && ApiService.lastDetailedError!.isNotEmpty
+              ? 'SERVER OFFLINE: ${ApiService.lastDetailedError}'
+              : 'SERVER OFFLINE - CHECK SETTINGS (⚙️)';
         } else if (ApiService.lastAuthError != null && ApiService.lastAuthError != 'AUTH_FAILED') {
           _errorMessage = ApiService.lastAuthError!.toUpperCase();
         } else {
@@ -162,83 +165,162 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
   void _showServerSettingsDialog() {
     final TextEditingController urlController = TextEditingController(text: ApiService.baseUrl);
+    String pingResult = '';
+    bool isPinging = false;
 
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppColors.midnightNavy.withValues(alpha: 0.95),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3), width: 1.5),
-          ),
-          title: Row(
-            children: const [
-              Icon(Icons.settings_suggest_rounded, color: AppColors.primary),
-              SizedBox(width: 10),
-              Text(
-                'Server Connection',
-                style: TextStyle(color: Colors.white, fontFamily: 'ProductSans', fontSize: 18),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppColors.midnightNavy.withValues(alpha: 0.95),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3), width: 1.5),
               ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Backend API Server URL',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.deepSpaceBlack.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.electricBlue.withValues(alpha: 0.3)),
-                ),
-                child: TextField(
-                  controller: urlController,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: const InputDecoration(
-                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    border: InputBorder.none,
-                    hintText: 'http://127.0.0.1:5000/api',
-                    hintStyle: TextStyle(color: Colors.white24),
+              title: Row(
+                children: const [
+                  Icon(Icons.settings_suggest_rounded, color: AppColors.primary),
+                  SizedBox(width: 10),
+                  Text(
+                    'Server Connection',
+                    style: TextStyle(color: Colors.white, fontFamily: 'ProductSans', fontSize: 18),
                   ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Backend API Server URL',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.deepSpaceBlack.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.electricBlue.withValues(alpha: 0.3)),
+                      ),
+                      child: TextField(
+                        controller: urlController,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          border: InputBorder.none,
+                          hintText: 'http://127.0.0.1:5000/api',
+                          hintStyle: TextStyle(color: Colors.white24),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        ActionChip(
+                          avatar: const Icon(Icons.cloud_queue_rounded, size: 14, color: AppColors.primary),
+                          label: const Text('Cloud Tunnel', style: TextStyle(fontSize: 11, color: Colors.white)),
+                          backgroundColor: AppColors.deepSpaceBlack,
+                          onPressed: () {
+                            setDialogState(() {
+                              urlController.text = ApiService.defaultFallbackUrl;
+                            });
+                          },
+                        ),
+                        ActionChip(
+                          avatar: const Icon(Icons.wifi_rounded, size: 14, color: Colors.cyanAccent),
+                          label: const Text('Local Wi-Fi', style: TextStyle(fontSize: 11, color: Colors.white)),
+                          backgroundColor: AppColors.deepSpaceBlack,
+                          onPressed: () {
+                            setDialogState(() {
+                              urlController.text = ApiService.defaultLocalUrl;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.midnightNavy,
+                            side: const BorderSide(color: AppColors.primary, width: 1),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          icon: isPinging
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                              : const Icon(Icons.network_check_rounded, size: 16, color: AppColors.primary),
+                          label: const Text('Test Connection', style: TextStyle(fontSize: 12, color: Colors.white)),
+                          onPressed: isPinging
+                              ? null
+                              : () async {
+                                  setDialogState(() {
+                                    isPinging = true;
+                                    pingResult = 'Testing connection...';
+                                  });
+                                  final sw = Stopwatch()..start();
+                                  final ok = await ApiService.testEndpoint(urlController.text.trim());
+                                  sw.stop();
+                                  setDialogState(() {
+                                    isPinging = false;
+                                    pingResult = ok
+                                        ? '✅ Connected! (${sw.elapsedMilliseconds}ms)'
+                                        : '❌ Failed to reach server';
+                                  });
+                                },
+                        ),
+                      ],
+                    ),
+                    if (pingResult.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        pingResult,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: pingResult.startsWith('✅') ? Colors.greenAccent : Colors.redAccent,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: AppColors.deepSpaceBlack,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () {
-                String newUrl = urlController.text.trim();
-                if (newUrl.isNotEmpty) {
-                  setState(() {
-                    ApiService.baseUrl = newUrl;
-                  });
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('API base URL updated to: $newUrl'),
-                      backgroundColor: AppColors.electricBlue,
-                    ),
-                  );
-                }
-              },
-              child: const Text('SAVE', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('CANCEL', style: TextStyle(color: AppColors.textMuted)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.deepSpaceBlack,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    String newUrl = urlController.text.trim();
+                    if (newUrl.isNotEmpty) {
+                      setState(() {
+                        ApiService.baseUrl = newUrl;
+                      });
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('API base URL updated to: $newUrl'),
+                          backgroundColor: AppColors.electricBlue,
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('SAVE', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -364,7 +446,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 32.0),
       decoration: BoxDecoration(
-        color: AppColors.midnightNavy.withValues(alpha: 0.4),
+        color: AppColors.midnightNavy.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(28.0),
         border: Border.all(
           color: AppColors.primary.withValues(alpha: 0.3),
@@ -372,23 +454,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.deepSpaceBlack.withValues(alpha: 0.8),
-            blurRadius: 40,
-            spreadRadius: 10,
-            offset: const Offset(0, 15),
-          ),
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.1),
-            blurRadius: 60,
-            spreadRadius: 0,
-            offset: const Offset(0, 0),
+            color: AppColors.deepSpaceBlack.withValues(alpha: 0.6),
+            blurRadius: 25,
+            spreadRadius: 5,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28.0),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -427,15 +503,75 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
               if (_errorMessage.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Text(
-                  _errorMessage.toUpperCase(),
-                  style: const TextStyle(
-                    color: AppColors.secondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.0,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
                   ),
-                  textAlign: TextAlign.center,
+                  child: Column(
+                    children: [
+                      Text(
+                        _errorMessage.toUpperCase(),
+                        style: const TextStyle(
+                          color: AppColors.secondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (_errorMessage.contains('OFFLINE') ||
+                          _errorMessage.contains('SERVER') ||
+                          _errorMessage.contains('TIMEOUT') ||
+                          _errorMessage.contains('NETWORK')) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                foregroundColor: AppColors.deepSpaceBlack,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.cloud_sync_rounded, size: 16),
+                              label: const Text(
+                                'Use Cloud Tunnel',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  ApiService.baseUrl = ApiService.defaultFallbackUrl;
+                                  _errorMessage = '';
+                                });
+                                ErrorHandler.showSuccess('Switched to Cloud Tunnel!');
+                              },
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: AppColors.primary, width: 1),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.settings_suggest_rounded, size: 16, color: AppColors.primary),
+                              label: const Text(
+                                'Change URL',
+                                style: TextStyle(fontSize: 11),
+                              ),
+                              onPressed: _showServerSettingsDialog,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ],
 
@@ -443,6 +579,51 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
               // CTA Button
               _buildCtaButton(isLoading),
+
+              const SizedBox(height: 18),
+
+              // Server indicator & configuration button
+              InkWell(
+                onTap: _showServerSettingsDialog,
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.deepSpaceBlack.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.greenAccent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Server: ${ApiService.baseUrl.replaceFirst("https://", "").replaceFirst("http://", "")}',
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.tune_rounded, size: 14, color: AppColors.primary),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+              const Text(
+                'v1.0.3+4 (Release Build)',
+                style: TextStyle(color: Colors.white30, fontSize: 10, letterSpacing: 1),
+              ),
             ],
           ),
         ),

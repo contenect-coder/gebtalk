@@ -78,7 +78,9 @@ class CallAudioManagerImpl {
   }
 
   static void stopRemoteAudio() {
-    // Reset remote audio state
+    try {
+      _channel.invokeMethod('resetAudioMode');
+    } catch (_) {}
   }
 
   static void cleanup() {

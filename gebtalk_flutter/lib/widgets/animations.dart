@@ -33,29 +33,34 @@ class _AnimatedListItemState extends State<AnimatedListItem>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 280),
     );
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.12),
+      begin: const Offset(0.0, 0.08),
       end: Offset.zero,
     ).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
     );
-    _scaleAnimation = Tween<double>(begin: 0.92, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    _scaleAnimation = Tween<double>(begin: 0.96, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
     );
     // Glow flash at the end of materialization
     _glowFlash = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.3), weight: 40),
-      TweenSequenceItem(tween: Tween(begin: 0.3, end: 0.0), weight: 60),
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.2), weight: 40),
+      TweenSequenceItem(tween: Tween(begin: 0.2, end: 0.0), weight: 60),
     ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
-    Future.delayed(widget.delay * widget.index, () {
-      if (mounted) _controller.forward();
-    });
+    if (widget.index > 8) {
+      _controller.value = 1.0;
+    } else {
+      final safeIndex = widget.index.clamp(0, 6);
+      Future.delayed(widget.delay * safeIndex, () {
+        if (mounted) _controller.forward();
+      });
+    }
   }
 
   @override

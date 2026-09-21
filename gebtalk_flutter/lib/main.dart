@@ -12,10 +12,12 @@ import 'services/api_service.dart';
 import 'widgets/call_overlay.dart';
 import 'utils/call_audio_tone_player.dart';
 import 'utils/call_audio_manager.dart';
+import 'utils/http_overrides.dart';
 import 'dart:ui';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  setupHttpOverrides();
   await ApiService.init();
   CallAudioTonePlayer.unlockAudio();
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -94,6 +96,7 @@ class GebTalkApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'GEBTALK',
+      navigatorKey: ErrorHandler.navigatorKey,
       scaffoldMessengerKey: ErrorHandler.scaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: TitanTheme.dark,

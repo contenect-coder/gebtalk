@@ -9,20 +9,93 @@ import '../utils/error_handler.dart';
 
 class ApiService {
   static String? authenticatedPhone;
+  static final http.Client client = http.Client();
+  static final http.Client _client = client;
 
-  static const String defaultFallbackUrl = 'https://border-campaign-thousand-announcements.trycloudflare.com/api';
+  static const String defaultFallbackUrl = 'https://commission-livecam-able-condition.trycloudflare.com/api';
+  static const String defaultLocalUrl = 'http://192.168.1.22:5000/api';
+  static String? lastDetailedError;
+  static String? lastAuthError;
   static String? _customBaseUrl;
+
+  static void log(String message) {
+    debugPrint(message);
+    try {
+      _client.get(
+        Uri.parse('$baseUrl/debug/log?msg=${Uri.encodeComponent(message)}'),
+        headers: {'User-Agent': 'GEBTALK-Client'},
+      ).catchError((_) => http.Response('', 500));
+    } catch (_) {}
+  }
+
+  static List<String> get candidateUrls {
+    final list = <String>[];
+    // 1. Live cloud tunnel is ALWAYS first priority for mobile connectivity
+    if (defaultFallbackUrl.isNotEmpty && !list.contains(defaultFallbackUrl)) {
+      list.add(defaultFallbackUrl);
+    }
+    // 2. Custom user-set URL (if set and not duplicate)
+    final current = _customBaseUrl ?? '';
+    if (current.isNotEmpty && !list.contains(current)) {
+      list.add(current);
+    }
+    // 3. Local URL as secondary fallback
+    if (defaultLocalUrl.isNotEmpty && !list.contains(defaultLocalUrl)) {
+      list.add(defaultLocalUrl);
+    }
+    return list;
+  }
+
+  static Future<bool> testEndpoint(String url) async {
+    try {
+      var target = url.trim();
+      if (target.endsWith('/')) target = target.substring(0, target.length - 1);
+      if (!target.endsWith('/api')) target = '$target/api';
+      final res = await _client.get(Uri.parse('$target/health')).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('saved_custom_base_url');
-      if (saved != null && saved.isNotEmpty && saved != '/api' && !saved.contains('netlify.app')) {
-        if (!kIsWeb && (saved.contains('10.0.2.2') || saved.contains('127.0.0.1') || saved.contains('localhost'))) {
-          _customBaseUrl = null;
-          await prefs.remove('saved_custom_base_url');
+      if (saved != null && saved.isNotEmpty) {
+        // On mobile: ONLY keep the saved URL if it exactly matches
+        // the current live tunnel. Purge everything else (local IPs,
+        // expired tunnels, netlify proxies, etc.)
+        if (!kIsWeb) {
+          if (saved == defaultFallbackUrl) {
+            _customBaseUrl = saved;
+          } else if (saved.contains('trycloudflare.com') &&
+              !saved.contains(defaultFallbackUrl.split('//').last.split('/').first)) {
+            // Expired/old Cloudflare tunnel — purge
+            _customBaseUrl = null;
+            await prefs.remove('saved_custom_base_url');
+            debugPrint('[ApiService] Purged stale tunnel URL: $saved');
+          } else if (saved.contains('192.168.') ||
+              saved.contains('10.0.') ||
+              saved.contains('10.0.2.2') ||
+              saved.contains('127.0.0.1') ||
+              saved.contains('localhost') ||
+              saved.contains('netlify.app')) {
+            // Local/private IP or netlify proxy — purge
+            _customBaseUrl = null;
+            await prefs.remove('saved_custom_base_url');
+            debugPrint('[ApiService] Purged local/invalid URL: $saved');
+          } else {
+            // User-configured non-local URL (e.g. their own VPS) — keep it
+            _customBaseUrl = saved;
+          }
         } else {
-          _customBaseUrl = saved;
+          // Web: keep any non-netlify saved URL
+          if (saved != '/api' && !saved.contains('netlify.app')) {
+            _customBaseUrl = saved;
+          } else {
+            _customBaseUrl = null;
+          }
         }
       } else {
         _customBaseUrl = null;
@@ -33,7 +106,7 @@ class ApiService {
   static void logDebug(String message) {
     try {
       final t = DateTime.now().millisecondsSinceEpoch;
-      http.get(Uri.parse('$baseUrl/debug/log?msg=${Uri.encodeComponent(message)}&_t=$t'));
+      _client.get(Uri.parse('$baseUrl/debug/log?msg=${Uri.encodeComponent(message)}&_t=$t'));
     } catch (_) {}
   }
 
@@ -62,13 +135,19 @@ class ApiService {
     }
 
     // Native Mobile (Android / iOS) or Desktop:
-    if (_customBaseUrl != null &&
-        _customBaseUrl!.isNotEmpty &&
-        !_customBaseUrl!.contains('netlify.app') &&
-        !_customBaseUrl!.contains('10.0.2.2') &&
-        !_customBaseUrl!.contains('127.0.0.1') &&
-        !_customBaseUrl!.contains('localhost')) {
-      return _customBaseUrl!;
+    // Only use _customBaseUrl if it's a valid external URL (not local IPs, not netlify proxy)
+    if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
+      final url = _customBaseUrl!.toLowerCase();
+      final isLocal = url.contains('192.168.') ||
+          url.contains('10.0.') ||
+          url.contains('172.16.') ||
+          url.contains('127.0.0.1') ||
+          url.contains('localhost') ||
+          url.contains('10.0.2.2') ||
+          url.contains('netlify.app');
+      if (!isLocal) {
+        return _customBaseUrl!;
+      }
     }
 
     // For mobile devices, default directly to the active live server URL:
@@ -90,6 +169,25 @@ class ApiService {
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('saved_custom_base_url', value);
       });
+    } catch (_) {}
+  }
+
+  static Future<void> setCustomBaseUrl(String url) async {
+    var target = url.trim();
+    if (target.endsWith('/')) target = target.substring(0, target.length - 1);
+    if (!target.endsWith('/api') && !target.contains('/api/')) target = '$target/api';
+    _customBaseUrl = target;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('saved_custom_base_url', target);
+    } catch (_) {}
+  }
+
+  static Future<void> resetToDefaultUrl() async {
+    _customBaseUrl = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('saved_custom_base_url');
     } catch (_) {}
   }
 
@@ -142,8 +240,6 @@ class ApiService {
     return null;
   }
 
-  static String? lastAuthError;
-
   static dynamic _parseJsonResponse(http.Response response, {String? defaultErrorMessage}) {
     if (response.statusCode >= 500) {
       lastAuthError = 'SERVER_ERROR';
@@ -174,7 +270,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> sendOtp(String phone) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/auth/send-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone}),
@@ -193,7 +289,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> sendEmailOtp(String email, {String name = ''}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/auth/send-email-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email, 'name': name}),
@@ -212,7 +308,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> verifyEmailOtp(String email, String otp, {String name = ''}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/auth/verify-email-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -237,73 +333,54 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>?> loginWithEmail(String identifier, String password) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/auth/login-email'),
-        headers: _authHeaders(json: true),
-        body: jsonEncode({
-          'identifier': identifier.trim(),
-          'email': identifier.trim(),
-          'username': identifier.trim(),
-          'password': password,
-        }),
-      ).timeout(const Duration(seconds: 15));
+    final cleanId = identifier.trim();
+    final targets = List<String>.from(candidateUrls);
+    String? lastErr;
 
-      if (defaultFallbackUrl.isNotEmpty && response.statusCode >= 500 && baseUrl != defaultFallbackUrl) {
-        final fallbackRes = await http.post(
-          Uri.parse('$defaultFallbackUrl/auth/login-email'),
+    for (final target in targets) {
+      try {
+        debugPrint('[ApiService] Attempting email login to: $target/auth/login-email');
+        final response = await _client.post(
+          Uri.parse('$target/auth/login-email'),
           headers: _authHeaders(json: true),
           body: jsonEncode({
-            'identifier': identifier.trim(),
-            'email': identifier.trim(),
-            'username': identifier.trim(),
+            'identifier': cleanId,
+            'email': cleanId,
+            'username': cleanId,
             'password': password,
           }),
-        ).timeout(const Duration(seconds: 15));
-        final fallbackData = _parseJsonResponse(fallbackRes, defaultErrorMessage: 'Invalid username/email or password');
-        if (fallbackData != null && fallbackData is Map<String, dynamic>) {
-          baseUrl = defaultFallbackUrl;
-          if (fallbackData['token'] != null) {
-            authenticatedPhone = fallbackData['token'];
-          }
-          return fallbackData;
-        }
-      }
+        ).timeout(const Duration(seconds: 8));
 
-      final data = _parseJsonResponse(response, defaultErrorMessage: 'Invalid username/email or password');
-      if (data != null && data is Map<String, dynamic>) {
-        if (data['token'] != null) {
-          authenticatedPhone = data['token'];
-        }
-        return data;
-      }
-    } catch (e) {
-      debugPrint('API Error: $e');
-      if (defaultFallbackUrl.isNotEmpty && baseUrl != defaultFallbackUrl) {
-        try {
-          final fallbackRes = await http.post(
-            Uri.parse('$defaultFallbackUrl/auth/login-email'),
-            headers: _authHeaders(json: true),
-            body: jsonEncode({
-              'identifier': identifier.trim(),
-              'email': identifier.trim(),
-              'username': identifier.trim(),
-              'password': password,
-            }),
-          ).timeout(const Duration(seconds: 15));
-          final fallbackData = _parseJsonResponse(fallbackRes, defaultErrorMessage: 'Invalid username/email or password');
-          if (fallbackData != null && fallbackData is Map<String, dynamic>) {
-            baseUrl = defaultFallbackUrl;
-            if (fallbackData['token'] != null) {
-              authenticatedPhone = fallbackData['token'];
+        debugPrint('[ApiService] Response from $target: ${response.statusCode}');
+
+        if (response.statusCode >= 200 && response.statusCode < 400) {
+          final data = _parseJsonResponse(response, defaultErrorMessage: 'Invalid username/email or password');
+          if (data != null && data is Map<String, dynamic>) {
+            baseUrl = target;
+            if (data['token'] != null) {
+              authenticatedPhone = data['token'];
             }
-            return fallbackData;
+            lastDetailedError = null;
+            lastAuthError = null;
+            return data;
           }
-        } catch (_) {}
+        } else if (response.statusCode == 401 || response.statusCode == 403) {
+          lastAuthError = 'AUTH_FAILED';
+          lastDetailedError = 'Invalid username/email or password';
+          ErrorHandler.showError('Invalid username or password');
+          return null;
+        } else {
+          lastErr = 'HTTP ${response.statusCode} from $target: ${response.body.isNotEmpty ? response.body : "No content"}';
+        }
+      } catch (e) {
+        lastErr = 'Error connecting to $target: $e';
+        debugPrint('[ApiService] Error connecting to $target: $e');
       }
-      lastAuthError = 'NETWORK_ERROR';
-      ErrorHandler.showError('Network Error: Unable to reach backend server.');
     }
+
+    lastDetailedError = lastErr;
+    lastAuthError = 'NETWORK_ERROR';
+    ErrorHandler.showError('Connection failed:\n${lastDetailedError ?? "Unable to reach server"}');
     return null;
   }
 
@@ -316,7 +393,7 @@ class ApiService {
     String countryFlag = '',
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/auth/verify-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -348,7 +425,7 @@ class ApiService {
       final uri = Uri.parse('$baseUrl/init').replace(
         queryParameters: phone != null ? {'phone': phone} : null,
       );
-      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
+      final response = await _client.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
@@ -356,7 +433,7 @@ class ApiService {
         final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
           queryParameters: phone != null ? {'phone': phone} : null,
         );
-        final fallbackRes = await http.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
+        final fallbackRes = await _client.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
         if (fallbackRes.statusCode == 200) {
           baseUrl = defaultFallbackUrl;
           return jsonDecode(fallbackRes.body);
@@ -369,7 +446,7 @@ class ApiService {
           final fallbackUri = Uri.parse('$defaultFallbackUrl/init').replace(
             queryParameters: phone != null ? {'phone': phone} : null,
           );
-          final fallbackRes = await http.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
+          final fallbackRes = await _client.get(fallbackUri, headers: _authHeaders()).timeout(const Duration(seconds: 15));
           if (fallbackRes.statusCode == 200) {
             baseUrl = defaultFallbackUrl;
             return jsonDecode(fallbackRes.body);
@@ -382,7 +459,7 @@ class ApiService {
 
   static Future<List<Folder>> getFolders() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/folders'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/folders'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => Folder.fromJson(item)).toList();
@@ -395,7 +472,7 @@ class ApiService {
 
   static Future<List<Tag>> getTags() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/tags'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/tags'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => Tag.fromJson(item)).toList();
@@ -408,7 +485,7 @@ class ApiService {
 
   static Future<Tag?> createTag(String id, String name, String color) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/tags'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'id': id, 'name': name, 'color': color}),
@@ -430,13 +507,13 @@ class ApiService {
 
   static Future<List<Contact>> getContacts() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/contacts'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/contacts'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => Contact.fromJson(item)).toList();
       }
       if (defaultFallbackUrl.isNotEmpty && response.statusCode == 530 && baseUrl != defaultFallbackUrl) {
-        final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
+        final fallbackRes = await _client.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
         if (fallbackRes.statusCode == 200) {
           baseUrl = defaultFallbackUrl;
           List data = jsonDecode(fallbackRes.body);
@@ -447,7 +524,7 @@ class ApiService {
       debugPrint('API Error (getContacts): $e');
       if (defaultFallbackUrl.isNotEmpty && baseUrl != defaultFallbackUrl) {
         try {
-          final fallbackRes = await http.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
+          final fallbackRes = await _client.get(Uri.parse('$defaultFallbackUrl/contacts'), headers: _authHeaders());
           if (fallbackRes.statusCode == 200) {
             baseUrl = defaultFallbackUrl;
             List data = jsonDecode(fallbackRes.body);
@@ -466,7 +543,7 @@ class ApiService {
       if (tagIds != null) body['tags'] = tagIds;
       if (assignedStaffId != null) body['assigned_staff_id'] = assignedStaffId;
 
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/assign'),
         headers: _authHeaders(json: true),
         body: jsonEncode(body),
@@ -490,7 +567,7 @@ class ApiService {
     String countryCode = '',
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -516,7 +593,7 @@ class ApiService {
 
   static Future<Contact?> createStaffFolder(String name, String phone, String role) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/staff'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -537,7 +614,7 @@ class ApiService {
 
   static Future<bool> deleteContact(String contactId) async {
     try {
-      final response = await http.delete(
+      final response = await _client.delete(
         Uri.parse('$baseUrl/contacts/$contactId'),
         headers: _authHeaders(),
       );
@@ -551,7 +628,7 @@ class ApiService {
 
   static Future<List<Message>> getMessages(String contactId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/contacts/$contactId/messages'),
         headers: _authHeaders(),
       );
@@ -575,7 +652,7 @@ class ApiService {
     String? fileSize,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/messages'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -599,7 +676,7 @@ class ApiService {
 
   static Future<List<String>> reactToMessage(String contactId, int messageId, String emoji) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/messages/$messageId/react'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'emoji': emoji}),
@@ -624,7 +701,7 @@ class ApiService {
     String? fileSize,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/broadcast'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -645,7 +722,7 @@ class ApiService {
 
   static Future<UserProfile?> getProfile() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/profile'),
         headers: _authHeaders(),
       );
@@ -661,7 +738,7 @@ class ApiService {
 
   static Future<UserProfile?> updateProfile(UserProfile profile) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -696,7 +773,7 @@ class ApiService {
     required String newPassword,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/account/change-password'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -735,7 +812,7 @@ class ApiService {
         bodyMap['name'] = newName.trim();
       }
 
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/admin/users/update-credentials'),
         headers: _authHeaders(json: true),
         body: jsonEncode(bodyMap),
@@ -753,7 +830,7 @@ class ApiService {
 
   static Future<List<BroadcastList>> getBroadcastLists() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/broadcast/lists'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/broadcast/lists'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => BroadcastList.fromJson(item)).toList();
@@ -767,7 +844,7 @@ class ApiService {
 
   static Future<bool> createBroadcastList(String name, List<String> memberIds, {String? id}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/broadcast/lists'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -786,7 +863,7 @@ class ApiService {
 
   static Future<bool> deleteBroadcastList(String id) async {
     try {
-      final response = await http.delete(
+      final response = await _client.delete(
         Uri.parse('$baseUrl/broadcast/lists/$id'),
         headers: _authHeaders(),
       );
@@ -800,7 +877,7 @@ class ApiService {
 
   static Future<List<UserStatus>> getStatuses() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/statuses'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/statuses'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => UserStatus.fromJson(item)).toList();
@@ -813,7 +890,7 @@ class ApiService {
 
   static Future<bool> createStatus(String text, {String? mediaUrl, String? caption}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/status/create'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -831,7 +908,7 @@ class ApiService {
 
   static Future<List<CallLog>> getCallLogs() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/calls'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/calls'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => CallLog.fromJson(item)).toList();
@@ -844,7 +921,7 @@ class ApiService {
 
   static Future<bool> logCall(String contactId, String contactName, String avatar, String callType, String direction, {String? duration}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/log'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -865,7 +942,7 @@ class ApiService {
 
   static Future<bool> editMessage(int messageId, String newText) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/edit'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'message_id': messageId, 'text': newText}),
@@ -879,7 +956,7 @@ class ApiService {
 
   static Future<bool> deleteMessage(int messageId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/delete'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'message_id': messageId}),
@@ -893,7 +970,7 @@ class ApiService {
 
   static Future<bool> createPoll(String chatId, String question, List<String> options) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/polls/create'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -910,7 +987,7 @@ class ApiService {
   }
   static Future<List<BroadcastHistoryItem>> getBroadcastHistory() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/broadcast/history'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/broadcast/history'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => BroadcastHistoryItem.fromJson(item)).toList();
@@ -926,7 +1003,7 @@ class ApiService {
 
   static Future<Message?> sendMessagePayload(String contactId, Map<String, dynamic> payload) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/messages'),
         headers: _authHeaders(json: true),
         body: jsonEncode(payload),
@@ -945,7 +1022,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> createGroup(String name, String description, List<String> memberIds) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/groups/create'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -965,7 +1042,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getGroupMembers(String groupId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/groups/$groupId/members'),
         headers: _authHeaders(),
       );
@@ -981,7 +1058,7 @@ class ApiService {
 
   static Future<List<ChannelModel>> getChannels() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/channels'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/channels'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => ChannelModel.fromJson(item)).toList();
@@ -994,7 +1071,7 @@ class ApiService {
 
   static Future<bool> followChannel(String channelId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/channels/$channelId/follow'),
         headers: _authHeaders(json: true),
       );
@@ -1007,7 +1084,7 @@ class ApiService {
 
   static Future<List<ChannelPost>> getChannelPosts(String channelId) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/channels/$channelId/posts'), headers: _authHeaders());
+      final response = await _client.get(Uri.parse('$baseUrl/channels/$channelId/posts'), headers: _authHeaders());
       if (response.statusCode == 200) {
         List data = jsonDecode(response.body);
         return data.map((item) => ChannelPost.fromJson(item)).toList();
@@ -1020,7 +1097,7 @@ class ApiService {
 
   static Future<bool> toggleStarMessage(int msgId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/$msgId/star'),
         headers: _authHeaders(json: true),
       );
@@ -1033,7 +1110,7 @@ class ApiService {
 
   static Future<bool> forwardMessages(List<int> msgIds, List<String> targetContactIds) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/forward'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -1050,7 +1127,7 @@ class ApiService {
 
   static Future<bool> setDisappearingTimer(String contactId, int timerSeconds) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/disappearing'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'disappearing_timer': timerSeconds}),
@@ -1064,7 +1141,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> globalSearch(String query, {String filter = 'all'}) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/search?q=${Uri.encodeComponent(query)}&filter=$filter'),
         headers: _authHeaders(),
       );
@@ -1079,7 +1156,7 @@ class ApiService {
 
   static Future<String?> translateMessage(String text, String targetLanguage) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/ai/translate'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -1099,7 +1176,7 @@ class ApiService {
 
   static Future<String?> summarizeChat(String contactId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/ai/summarize'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'contact_id': contactId}),
@@ -1116,7 +1193,7 @@ class ApiService {
 
   static Future<bool> setAppLock(bool enabled, String pin) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/app-lock'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'enabled': enabled, 'pin': pin}),
@@ -1134,7 +1211,7 @@ class ApiService {
 
   static Future<bool> setTyping(String contactId, bool isTyping) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/typing'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'contact_id': contactId, 'is_typing': isTyping}),
@@ -1148,7 +1225,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getTyping(String contactId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/typing/$contactId'),
         headers: _authHeaders(),
       );
@@ -1166,7 +1243,7 @@ class ApiService {
 
   static Future<bool> updatePresence(bool isOnline) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/presence/update'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'is_online': isOnline}),
@@ -1180,7 +1257,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getPresence(String userId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/presence/$userId'),
         headers: _authHeaders(),
       );
@@ -1197,7 +1274,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> toggleArchive(String contactId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/archive'),
         headers: _authHeaders(json: true),
         body: jsonEncode({}),
@@ -1213,7 +1290,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getArchivedChats() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/chats/archived'),
         headers: _authHeaders(),
       );
@@ -1231,7 +1308,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> toggleMute(String contactId, {String? mutedUntil}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/mute'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'muted_until': mutedUntil}),
@@ -1249,7 +1326,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> togglePin(String contactId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/pin'),
         headers: _authHeaders(json: true),
         body: jsonEncode({}),
@@ -1267,7 +1344,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> toggleBlock(String contactId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/block'),
         headers: _authHeaders(json: true),
         body: jsonEncode({}),
@@ -1283,7 +1360,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getBlockedContacts() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/contacts/blocked'),
         headers: _authHeaders(),
       );
@@ -1301,7 +1378,7 @@ class ApiService {
 
   static Future<bool> setWallpaper(String contactId, String wallpaperUrl) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/wallpaper'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'wallpaper_url': wallpaperUrl}),
@@ -1317,7 +1394,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getChatPreferences() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/chats/preferences'),
         headers: _authHeaders(),
       );
@@ -1334,7 +1411,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getMessageReceipts(int messageId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/messages/$messageId/receipts'),
         headers: _authHeaders(),
       );
@@ -1352,7 +1429,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getChatMedia(String contactId, {String filter = 'all'}) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/chats/$contactId/media?filter=$filter'),
         headers: _authHeaders(),
       );
@@ -1370,7 +1447,7 @@ class ApiService {
 
   static Future<bool> clearChat(String contactId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/clear'),
         headers: _authHeaders(json: true),
         body: jsonEncode({}),
@@ -1386,7 +1463,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> exportChat(String contactId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/chats/$contactId/export'),
         headers: _authHeaders(),
       );
@@ -1403,7 +1480,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getStickerPacks() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/stickers/packs'));
+      final response = await _client.get(Uri.parse('$baseUrl/stickers/packs'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List;
         return data.cast<Map<String, dynamic>>();
@@ -1416,7 +1493,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getPackStickers(String packId) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/stickers/packs/$packId/stickers'));
+      final response = await _client.get(Uri.parse('$baseUrl/stickers/packs/$packId/stickers'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List;
         return data.cast<Map<String, dynamic>>();
@@ -1429,7 +1506,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> searchGifs(String query) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/gifs/search?q=$query'));
+      final response = await _client.get(Uri.parse('$baseUrl/gifs/search?q=$query'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List;
         return data.cast<Map<String, dynamic>>();
@@ -1446,7 +1523,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getCommunities() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/communities'),
         headers: _authHeaders(),
       );
@@ -1462,7 +1539,7 @@ class ApiService {
 
   static Future<bool> createCommunity(String name, String description) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/communities'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'name': name, 'description': description}),
@@ -1478,7 +1555,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getWalletBalance() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/wallet/balance'),
         headers: _authHeaders(),
       );
@@ -1493,7 +1570,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> sendPayment(String receiverId, double amount, String note) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/payments/send'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -1513,7 +1590,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getPaymentHistory() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/payments/history'),
         headers: _authHeaders(),
       );
@@ -1531,7 +1608,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getNewsletters() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/newsletters'));
+      final response = await _client.get(Uri.parse('$baseUrl/newsletters'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List;
         return data.cast<Map<String, dynamic>>();
@@ -1544,7 +1621,7 @@ class ApiService {
 
   static Future<bool> followNewsletter(String id) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/newsletters/$id/follow'),
         headers: _authHeaders(json: true),
       );
@@ -1561,7 +1638,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getLinkedDevices() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/devices'),
         headers: _authHeaders(),
       );
@@ -1577,7 +1654,7 @@ class ApiService {
 
   static Future<bool> linkDevice(String deviceName, {String deviceType = 'web'}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/devices/link'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'device_name': deviceName, 'device_type': deviceType}),
@@ -1591,7 +1668,7 @@ class ApiService {
 
   static Future<bool> unlinkDevice(String did) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/devices/$did/unlink'),
         headers: _authHeaders(json: true),
       );
@@ -1606,7 +1683,7 @@ class ApiService {
 
   static Future<bool> reportContact(String reportedId, {String reportType = 'spam', String reason = ''}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/report'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -1627,7 +1704,7 @@ class ApiService {
   // --- Pinned Messages in Chat ---
   static Future<bool> togglePinMessage(int msgId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/$msgId/pin'),
         headers: _authHeaders(json: true),
       );
@@ -1640,7 +1717,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getPinnedMessages(String contactId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/chats/$contactId/pinned'),
         headers: _authHeaders(),
       );
@@ -1657,7 +1734,7 @@ class ApiService {
   // --- Starred Messages List ---
   static Future<List<Map<String, dynamic>>> getStarredMessages() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/messages/starred'),
         headers: _authHeaders(),
       );
@@ -1674,7 +1751,7 @@ class ApiService {
   // --- View Once ---
   static Future<bool> markViewOnce(int msgId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/messages/$msgId/view-once'),
         headers: _authHeaders(json: true),
       );
@@ -1688,7 +1765,7 @@ class ApiService {
   // --- Status Views ---
   static Future<bool> recordStatusView(String statusId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/statuses/$statusId/view'),
         headers: _authHeaders(json: true),
       );
@@ -1701,7 +1778,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getStatusViews(String statusId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/statuses/$statusId/views'),
         headers: _authHeaders(),
       );
@@ -1718,7 +1795,7 @@ class ApiService {
   // --- Call Links ---
   static Future<Map<String, dynamic>?> createCallLink({String callType = 'video', String linkName = 'GebTalk Meeting'}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/link'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'call_type': callType, 'link_name': linkName}),
@@ -1734,7 +1811,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getCallLink(String linkId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/calls/link/$linkId'),
         headers: _authHeaders(),
       );
@@ -1750,7 +1827,7 @@ class ApiService {
   // --- Storage & Data Manager ---
   static Future<Map<String, dynamic>?> getStorageSummary() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/storage/summary'),
         headers: _authHeaders(),
       );
@@ -1765,7 +1842,7 @@ class ApiService {
 
   static Future<bool> clearChatMedia(String contactId) async {
     try {
-      final response = await http.delete(
+      final response = await _client.delete(
         Uri.parse('$baseUrl/storage/chat/$contactId'),
         headers: _authHeaders(),
       );
@@ -1779,7 +1856,7 @@ class ApiService {
   // --- Account 2FA and Deletion ---
   static Future<bool> setAccount2FA(bool enabled, String pin) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/account/2fa'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'enabled': enabled, 'pin': pin}),
@@ -1793,7 +1870,7 @@ class ApiService {
 
   static Future<bool> deleteAccount() async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/account/delete'),
         headers: _authHeaders(json: true),
       );
@@ -1807,7 +1884,7 @@ class ApiService {
   // --- Privacy Settings ---
   static Future<bool> updatePrivacySettings(Map<String, dynamic> settings) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/privacy'),
         headers: _authHeaders(json: true),
         body: jsonEncode(settings),
@@ -1822,7 +1899,7 @@ class ApiService {
   // --- Chat Wallpaper ---
   static Future<bool> setChatWallpaper(String contactId, String wallpaper) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chats/$contactId/wallpaper'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'wallpaper': wallpaper}),
@@ -1843,7 +1920,7 @@ class ApiService {
     String callType = 'video',
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/email/start'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -1866,7 +1943,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getEmailMeetingInfo(String meetingId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/calls/email/meeting/$meetingId'),
       );
       if (response.statusCode == 200) {
@@ -1884,7 +1961,7 @@ class ApiService {
     required String guestName,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/email/meeting/$meetingId/join'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'guest_name': guestName}),
@@ -1901,7 +1978,7 @@ class ApiService {
 
   static Future<bool> endEmailMeeting(String meetingId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/email/meeting/$meetingId/end'),
       );
       return response.statusCode == 200;
@@ -1913,7 +1990,7 @@ class ApiService {
 
   static Future<List<Map<String, dynamic>>> getEmailCallsHistory() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/calls/email/history'),
         headers: _authHeaders(),
       );
@@ -1932,7 +2009,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> sendProfileEmailOtp(String email) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/email/send-otp'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'email': email}),
@@ -1946,7 +2023,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> verifyProfileEmailOtp(String email, String otp) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/profile/email/verify-otp'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'email': email, 'otp': otp}),
@@ -1960,7 +2037,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> lookupCallTarget(String target) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/lookup-target'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'target': target}),
@@ -1981,7 +2058,7 @@ class ApiService {
     String? callbackUrl,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/notify-missed'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2001,7 +2078,7 @@ class ApiService {
 
   static Future<List<DirectoryUser>> searchUsers(String query) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/users/search?q=${Uri.encodeComponent(query)}'),
         headers: _authHeaders(),
       );
@@ -2022,7 +2099,7 @@ class ApiService {
     String? message,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/request'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2042,7 +2119,7 @@ class ApiService {
 
   static Future<List<ContactRequest>> getContactRequests() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/contacts/requests'),
         headers: _authHeaders(),
       );
@@ -2059,7 +2136,7 @@ class ApiService {
 
   static Future<bool> respondContactRequest(int requestId, String action) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/respond'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2077,7 +2154,7 @@ class ApiService {
   static Future<Map<String, dynamic>> getEmails({String folder = 'inbox', String search = ''}) async {
     try {
       final uri = Uri.parse('$baseUrl/emails?folder=$folder&search=${Uri.encodeComponent(search)}');
-      final response = await http.get(uri, headers: _authHeaders());
+      final response = await _client.get(uri, headers: _authHeaders());
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['emails'] as List? ?? [];
@@ -2096,7 +2173,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getEmailDetail(String emailId) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/emails/$emailId'),
         headers: _authHeaders(),
       );
@@ -2117,7 +2194,7 @@ class ApiService {
     List<Map<String, dynamic>>? attachments,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/emails/send'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2137,7 +2214,7 @@ class ApiService {
 
   static Future<bool> toggleEmailStar(String emailId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/emails/$emailId/star'),
         headers: _authHeaders(),
       );
@@ -2150,7 +2227,7 @@ class ApiService {
 
   static Future<bool> deleteEmail(String emailId) async {
     try {
-      final response = await http.delete(
+      final response = await _client.delete(
         Uri.parse('$baseUrl/emails/$emailId'),
         headers: _authHeaders(),
       );
@@ -2163,7 +2240,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> convertEmailToChat(String emailId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/emails/convert-to-chat'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'email_id': emailId}),
@@ -2184,7 +2261,7 @@ class ApiService {
     String? subject,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/chat/forward-to-email'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2213,7 +2290,7 @@ class ApiService {
     String? notes,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/admin/accounts/create'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2244,7 +2321,7 @@ class ApiService {
     required String? assignedStaffId,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/contacts/$contactId/assign'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2268,7 +2345,7 @@ class ApiService {
     String? deviceName,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/devices/register'),
         headers: _authHeaders(json: true),
         body: jsonEncode({
@@ -2288,7 +2365,7 @@ class ApiService {
 
   static Future<bool> unregisterDevice(String deviceId) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/devices/unregister'),
         headers: _authHeaders(json: true),
         body: jsonEncode({'device_id': deviceId}),
@@ -2302,7 +2379,7 @@ class ApiService {
 
   static Future<bool> cancelCall(int callId, {String reason = 'cancelled'}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/cancel'),
         headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
         body: jsonEncode({'call_id': callId, 'reason': reason}),
@@ -2316,7 +2393,7 @@ class ApiService {
 
   static Future<bool> declineCall(int callId, {String reason = 'declined'}) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/calls/decline'),
         headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
         body: jsonEncode({'call_id': callId, 'reason': reason}),

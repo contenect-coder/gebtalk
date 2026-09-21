@@ -5,8 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_models.dart';
 import '../models/email_models.dart';
 import '../services/api_service.dart';
+import '../services/background_service.dart';
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
+  AppState() {
+    WidgetsBinding.instance.addObserver(this);
+    BackgroundService.initialize();
+  }
   bool _authenticated = false;
   String _phoneNumber = '';
   Map<String, dynamic>? _userProfile;
@@ -566,12 +571,21 @@ class AppState extends ChangeNotifier {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final isFg = state == AppLifecycleState.resumed;
+    BackgroundService.setAppForeground(isFg);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     stopContactsPolling();
     super.dispose();
   }
 
   void logout() {
+    BackgroundService.stop();
     _authenticated = false;
     _phoneNumber = '';
     _userProfile = null;
@@ -653,6 +667,15 @@ class AppState extends ChangeNotifier {
 
       _applyRolePermissions();
       startContactsPolling();
+      
+      final activeUserId = _currentProfile?.email ?? _currentProfile?.id ?? _phoneNumber;
+      if (activeUserId.isNotEmpty) {
+        try {
+          BackgroundService.start(activeUserId, ApiService.baseUrl);
+        } catch (e) {
+          debugPrint('[BackgroundService] Failed to start: $e');
+        }
+      }
       
       final bStopwatch = Stopwatch()..start();
       await Future.wait([
@@ -747,9 +770,33 @@ class AppState extends ChangeNotifier {
     refreshContacts(); // Refresh list to get any new updates
   }
 
+  bool _hasContactsChanged(List<Contact> oldList, List<Contact> newList) {
+    if (oldList.length != newList.length) return true;
+    for (int i = 0; i < oldList.length; i++) {
+      final o = oldList[i];
+      final n = newList[i];
+      if (o.id != n.id ||
+          o.unreadCount != n.unreadCount ||
+          o.name != n.name ||
+          o.avatar != n.avatar ||
+          o.status != n.status ||
+          o.role != n.role ||
+          o.folder != n.folder ||
+          o.lastMessage?.id != n.lastMessage?.id ||
+          o.lastMessage?.text != n.lastMessage?.text ||
+          o.lastMessage?.time != n.lastMessage?.time) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   Future<void> refreshContacts() async {
-    _contacts = await ApiService.getContacts();
-    notifyListeners();
+    final newContacts = await ApiService.getContacts();
+    if (_contacts.isEmpty || _hasContactsChanged(_contacts, newContacts)) {
+      _contacts = newContacts;
+      notifyListeners();
+    }
   }
 
   Future<bool> sendMessage(String text, {bool isAudio = false, String? duration, bool isFile = false, String? fileName, String? fileSize}) async {

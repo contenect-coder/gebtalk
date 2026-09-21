@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return Container(
           height: 80,
           decoration: BoxDecoration(
-            color: AppColors.surface.withValues(alpha: 0.65),
+            color: AppColors.surface.withValues(alpha: 0.90),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: AppColors.primary.withValues(alpha: 0.08 + glowVal * 0.08),
@@ -183,19 +183,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.7),
-                blurRadius: 35,
-                offset: const Offset(0, 12),
+                color: Colors.black.withValues(alpha: 0.5),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
               BoxShadow(
                 color: AppColors.primary.withValues(alpha: 0.04 + glowVal * 0.03),
-                blurRadius: 25,
-                spreadRadius: -4,
-              ),
-              BoxShadow(
-                color: AppColors.nebulaPurple.withValues(alpha: 0.02 + glowVal * 0.02),
-                blurRadius: 40,
-                spreadRadius: -8,
+                blurRadius: 15,
+                spreadRadius: -2,
               ),
             ],
           ),
@@ -203,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(22),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
               child: Stack(
                 children: [
                   // Shockwave ripple on tab switch

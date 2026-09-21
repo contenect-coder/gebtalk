@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:http/http.dart' as http;
+
 import 'api_service.dart';
 import 'web_notification_service.dart';
+import 'background_service.dart';
 import '../utils/call_audio_tone_player.dart';
 import '../utils/webrtc_audio_sink.dart';
 
@@ -37,7 +38,7 @@ class WebRtcService extends ChangeNotifier {
   bool _isRendererInitialized = false;
 
   bool isMuted = false;
-  bool isSpeakerOn = kIsWeb;
+  bool isSpeakerOn = true; // Default to loudspeaker so remote talking voice is clearly audible immediately
 
   Timer? _incomingPollTimer;
   Timer? _signalingPollTimer;
@@ -107,25 +108,36 @@ class WebRtcService extends ChangeNotifier {
           'stun:stun.l.google.com:19302',
           'stun:stun1.l.google.com:19302',
           'stun:stun2.l.google.com:19302',
-          'stun:stun3.l.google.com:19302',
-          'stun:stun4.l.google.com:19302',
-          'stun:stun.services.mozilla.com',
           'stun:stun.cloudflare.com:3478',
-          'stun:stun.sipgate.net:3478',
           'stun:global.stun.twilio.com:3478',
+          'stun:stun.voip.blackberry.com:3478',
+          'stun:stun.relay.metered.ca:80',
         ]
       },
       {
-        'urls': [
-          'turn:openrelay.metered.ca:80',
-          'turn:openrelay.metered.ca:443',
-          'turn:openrelay.metered.ca:443?transport=tcp',
-          'turns:openrelay.metered.ca:443?transport=tcp',
-        ],
-        'username': 'openrelayproject',
-        'credential': 'openrelayproject',
+        'urls': ['turn:global.relay.metered.ca:80'],
+        'username': 'ba0a081a6cd831d64516c6ab',
+        'credential': 'QELoKNYxJHSQ54mp',
+      },
+      {
+        'urls': ['turn:global.relay.metered.ca:80?transport=tcp'],
+        'username': 'ba0a081a6cd831d64516c6ab',
+        'credential': 'QELoKNYxJHSQ54mp',
+      },
+      {
+        'urls': ['turn:global.relay.metered.ca:443'],
+        'username': 'ba0a081a6cd831d64516c6ab',
+        'credential': 'QELoKNYxJHSQ54mp',
+      },
+      {
+        'urls': ['turns:global.relay.metered.ca:443?transport=tcp'],
+        'username': 'ba0a081a6cd831d64516c6ab',
+        'credential': 'QELoKNYxJHSQ54mp',
       }
     ],
+    'iceCandidatePoolSize': 2,
+    'bundlePolicy': 'max-bundle',
+    'rtcpMuxPolicy': 'require',
     'sdpSemantics': 'unified-plan',
   };
 
@@ -154,12 +166,40 @@ class WebRtcService extends ChangeNotifier {
     }
     _fetchIceConfig();
     _startIncomingCallPolling();
+
+    // Hook native background notification Answer action
+    BackgroundService.onAnswerCall = (callId, callerId, callerName) async {
+      debugPrint('[WebRTC] Native notification answered: $callId from $callerName');
+      await handleNativeAnswerCall(callId, callerId, callerName);
+    };
+
+    BackgroundService.checkInitialCall().then((initialCall) {
+      if (initialCall != null && initialCall.isNotEmpty) {
+        final callId = initialCall['call_id'] ?? '';
+        final callerId = initialCall['caller_id'] ?? '';
+        final callerName = initialCall['caller_name'] ?? callerId;
+        if (callId.isNotEmpty) {
+          handleNativeAnswerCall(callId, callerId, callerName);
+        }
+      }
+    });
+  }
+
+  Future<void> handleNativeAnswerCall(String callId, String callerId, String callerName) async {
+    currentCallId = callId;
+    currentPeerId = callerId;
+    currentPeerName = callerName;
+    isCaller = false;
+    callState = 'ringing';
+    statusMessage = 'Answering call...';
+    notifyListeners();
+    await acceptCall();
   }
 
   /// Fetch dynamic STUN / TURN server configurations from backend
   Future<void> _fetchIceConfig() async {
     try {
-      final res = await http.get(
+      final res = await ApiService.client.get(
         Uri.parse('${ApiService.baseUrl}/calls/config'),
         headers: {'User-Agent': 'GEBTALK-Client'},
       );
@@ -202,7 +242,7 @@ class WebRtcService extends ChangeNotifier {
     errorMessage = null;
     callDurationSeconds = 0;
     isMuted = false;
-    isSpeakerOn = false;
+    isSpeakerOn = true;
     notifyListeners();
   }
 
@@ -212,7 +252,7 @@ class WebRtcService extends ChangeNotifier {
     _incomingPollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       if (callState != 'idle' || currentUserId == null) return;
       try {
-        final response = await http.get(
+        final response = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/incoming?callee_id=$currentUserId'),
           headers: {'User-Agent': 'GEBTALK-Client'},
         );
@@ -253,16 +293,19 @@ class WebRtcService extends ChangeNotifier {
   }
 
   // Polling for call status, answers, and candidates
-  void _startSignalingPolling() {
+  void _startSignalingPolling({bool resetCandidateId = true}) {
     _signalingPollTimer?.cancel();
-    _lastFetchedCandidateId = 0;
+    if (resetCandidateId) {
+      _lastFetchedCandidateId = 0;
+    }
     
-    _signalingPollTimer = Timer.periodic(const Duration(milliseconds: 1200), (timer) async {
+    // Fast 500ms polling during call setup for sub-second candidate & answer exchange
+    _signalingPollTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
       if (currentCallId == null) return;
       
       try {
         // 1. Check status of call
-        final statusRes = await http.get(
+        final statusRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/status?call_id=$currentCallId'),
           headers: {'User-Agent': 'GEBTALK-Client'},
         );
@@ -310,7 +353,7 @@ class WebRtcService extends ChangeNotifier {
                   : answerStr.contains('a=recvonly') ? 'recvonly' 
                   : answerStr.contains('a=sendonly') ? 'sendonly' 
                   : answerStr.contains('a=inactive') ? 'inactive' : 'unknown';
-              debugPrint('[WebRTC][DIAG] SDP ANSWER: m=audio=${hasAudio} direction=$direction');
+              debugPrint('[WebRTC][DIAG] SDP ANSWER: m=audio=$hasAudio direction=$direction');
               
               await _peerConnection?.setRemoteDescription(
                 RTCSessionDescription(sdpAnswer, 'answer')
@@ -343,22 +386,19 @@ class WebRtcService extends ChangeNotifier {
                 }).catchError((_) {});
               }
 
-              // Default to loudspeaker on Web (browsers have no access to physical top earpiece), or top earpiece on native mobile
-              await _applyAudioRouting(kIsWeb ? true : false);
+              // Default to loudspeaker on mobile & web so talking voice is immediately audible
+              await _applyAudioRouting(true);
               
-              callState = 'connected';
-              statusMessage = null;
-              callStartTime = DateTime.now();
-              _startDurationTimer();
-              CallAudioTonePlayer.playCallConnectedChime();
-              debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED (caller side)');
+              callState = 'connecting';
+              statusMessage = 'Connecting audio stream...';
+              ApiService.log('[WebRTC][$currentUserId] Remote answer received, connecting media stream...');
               notifyListeners();
             }
           }
         }
 
         // 2. Fetch remote ICE candidates
-        final iceRes = await http.get(
+        final iceRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/ice-candidates?call_id=$currentCallId&exclude_sender_id=$currentUserId'),
           headers: {'User-Agent': 'GEBTALK-Client'},
         );
@@ -366,23 +406,46 @@ class WebRtcService extends ChangeNotifier {
         if (iceRes.statusCode == 200) {
           final List candidates = json.decode(iceRes.body);
           for (var item in candidates) {
-            final int id = item['id'];
+            final int id = item['id'] is int ? item['id'] : (int.tryParse(item['id'].toString()) ?? 0);
             if (id > _lastFetchedCandidateId) {
               _lastFetchedCandidateId = id;
-              final candMap = json.decode(item['candidate']);
+              
+              Map<String, dynamic>? candMap;
+              if (item['candidate'] is Map) {
+                candMap = Map<String, dynamic>.from(item['candidate']);
+              } else if (item['candidate'] is String) {
+                try {
+                  final decoded = json.decode(item['candidate']);
+                  if (decoded is Map) {
+                    candMap = Map<String, dynamic>.from(decoded);
+                  }
+                } catch (_) {}
+              }
+              
+              if (candMap == null || candMap['candidate'] == null) continue;
+              final candidateStr = candMap['candidate']?.toString();
+              if (candidateStr == null || candidateStr.isEmpty) continue;
+              
+              final sdpMid = candMap['sdpMid']?.toString();
+              final sdpMLineIndex = candMap['sdpMLineIndex'] != null 
+                  ? int.tryParse(candMap['sdpMLineIndex'].toString()) 
+                  : null;
+
               final candidate = RTCIceCandidate(
-                candMap['candidate'],
-                candMap['sdpMid'],
-                candMap['sdpMLineIndex'],
+                candidateStr,
+                sdpMid,
+                sdpMLineIndex,
               );
               if (_isRemoteDescriptionSet && _peerConnection != null) {
                 try {
                   await _peerConnection!.addCandidate(candidate);
+                  debugPrint('[WebRTC] Added remote ICE candidate: ${candidateStr.split(' ').take(8).join(' ')}');
                 } catch (ce) {
                   debugPrint('[WebRTC] Error adding remote candidate: $ce');
                 }
               } else {
                 _pendingRemoteCandidates.add(candidate);
+                debugPrint('[WebRTC] Buffered remote ICE candidate');
               }
             }
           }
@@ -406,7 +469,7 @@ class WebRtcService extends ChangeNotifier {
         'sdpMid': candidate.sdpMid,
         'sdpMLineIndex': candidate.sdpMLineIndex,
       });
-      await http.post(
+      await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/ice-candidate'),
         headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
         body: json.encode({
@@ -429,7 +492,8 @@ class WebRtcService extends ChangeNotifier {
     }
   }
 
-  /// Unified Audio Routing: Applies routing across both flutter_webrtc helper and native Android AudioManager
+  /// Unified Audio Routing: Applies routing across flutter_webrtc helper and native Android AudioManager,
+  /// and ensures all remote audio tracks are active at 100% volume
   Future<void> _applyAudioRouting(bool speakerOn) async {
     isSpeakerOn = speakerOn;
     if (!kIsWeb) {
@@ -444,6 +508,70 @@ class WebRtcService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[WebRTC] WebRtcAudioSink.setSpeakerphoneOn error: $e');
     }
+
+    // Force full volume and enabled state on all remote tracks
+    if (remoteStream != null) {
+      for (var track in remoteStream!.getAudioTracks()) {
+        track.enabled = true;
+        try {
+          await Helper.setVolume(1.0, track);
+        } catch (_) {}
+      }
+    }
+    if (_peerConnection != null) {
+      try {
+        final receivers = await _peerConnection!.getReceivers();
+        for (var receiver in receivers) {
+          if (receiver.track != null && receiver.track!.kind == 'audio') {
+            receiver.track!.enabled = true;
+            try {
+              await Helper.setVolume(1.0, receiver.track!);
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
+  /// Unified call connected state transition ensuring audio tracks and loudspeaker are 100% live
+  Future<void> _markCallConnected([String source = 'ICE']) async {
+    if (callState == 'connected') return;
+    callState = 'connected';
+    statusMessage = null;
+    callStartTime ??= DateTime.now();
+    _startDurationTimer();
+    CallAudioTonePlayer.stopAllTones();
+    CallAudioTonePlayer.playCallConnectedChime();
+    
+    // Ensure all local microphone tracks are unmuted and transmitting
+    if (localStream != null) {
+      for (var track in localStream!.getAudioTracks()) {
+        track.enabled = !isMuted;
+      }
+    }
+    // Ensure all RTP senders and receivers are active at maximum volume
+    if (_peerConnection != null) {
+      _peerConnection!.getSenders().then((senders) {
+        for (var sender in senders) {
+          if (sender.track != null && sender.track!.kind == 'audio') {
+            sender.track!.enabled = !isMuted;
+          }
+        }
+      }).catchError((_) {});
+      _peerConnection!.getReceivers().then((receivers) {
+        for (var receiver in receivers) {
+          if (receiver.track != null) {
+            receiver.track!.enabled = true;
+            Helper.setVolume(1.0, receiver.track!).catchError((_) {});
+          }
+        }
+      }).catchError((_) {});
+    }
+    await _applyAudioRouting(isSpeakerOn);
+    await refreshAudioDiagnostics();
+    debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED (source: $source)');
+    ApiService.log('[WebRTC][$currentUserId] Call fully CONNECTED ($source)! Audio streaming live.');
     notifyListeners();
   }
 
@@ -458,10 +586,6 @@ class WebRtcService extends ChangeNotifier {
       _transitionToTerminalState('failed');
       return false;
     }
-
-    // NOTE: Do NOT set audio routing before getUserMedia.
-    // flutter_webrtc configures its own audio session during getUserMedia.
-    // Setting MODE_IN_COMMUNICATION prematurely causes race conditions.
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
@@ -494,17 +618,27 @@ class WebRtcService extends ChangeNotifier {
         debugPrint('[WebRTC][DIAG] LOCAL TRACK STATE: enabled=${track.enabled} | kind=${track.kind} | muted=${track.muted} | id=${track.id}');
         track.enabled = !isMuted;
       }
+      ApiService.log('[WebRTC][$currentUserId] Local audio track ready (count: ${audioTracks.length}, enabled=${!isMuted})');
       // Allow microphone hardware to settle
       await Future.delayed(const Duration(milliseconds: 120));
     } else {
       localTrackState = 'NOT FOUND';
       debugPrint('[WebRTC][DIAG] LOCAL AUDIO TRACK: NOT FOUND (localStream is null)');
+      ApiService.log('[WebRTC][$currentUserId] WARNING: localStream is null!');
     }
     
     try {
+      // Refresh fresh ICE configuration from backend (with live Metered TURN credentials)
+      try {
+        await _fetchIceConfig().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('[WebRTC] _fetchIceConfig timed out/failed, using fallback: $e');
+      }
+
       _isRemoteDescriptionSet = false;
       _peerConnection = await createPeerConnection(_iceConfiguration);
       debugPrint('[WebRTC][DIAG] PEER CONNECTION: CREATED');
+      ApiService.log('[WebRTC][$currentUserId] PeerConnection created with ${_iceConfiguration['iceServers']?.length ?? 0} ICE server blocks');
       
       // Add local tracks to peer connection if available
       if (localStream != null) {
@@ -512,6 +646,7 @@ class WebRtcService extends ChangeNotifier {
           _peerConnection!.addTrack(track, localStream!);
         });
         debugPrint('[WebRTC][DIAG] Added ${localStream!.getTracks().length} local track(s) to PeerConnection');
+        ApiService.log('[WebRTC][$currentUserId] Added ${localStream!.getTracks().length} local tracks to PeerConnection');
       } else {
         try {
           await _peerConnection!.addTransceiver(
@@ -521,12 +656,16 @@ class WebRtcService extends ChangeNotifier {
             ),
           );
           debugPrint('[WebRTC][DIAG] Added RecvOnly audio transceiver (no mic)');
+          ApiService.log('[WebRTC][$currentUserId] Added RecvOnly transceiver');
         } catch (_) {}
       }
 
       // Handle local candidates
       _peerConnection!.onIceCandidate = (candidate) async {
         if (candidate.candidate == null || candidate.candidate!.isEmpty) return;
+        final candPrefix = candidate.candidate?.split(' ').take(8).join(' ') ?? '';
+        debugPrint('[WebRTC] Local candidate gathered: $candPrefix');
+        ApiService.log('[WebRTC][$currentUserId] Gathered candidate: $candPrefix');
         if (currentCallId == null || currentUserId == null) {
           _pendingLocalCandidates.add(candidate);
           debugPrint('[WebRTC] Buffered local ICE candidate while callId is pending');
@@ -538,60 +677,31 @@ class WebRtcService extends ChangeNotifier {
       // Handle connection states
       _peerConnection!.onConnectionState = (state) {
         debugPrint('[WebRTC][DIAG] PEER CONNECTION STATE: $state');
+        ApiService.log('[WebRTC][$currentUserId] PeerConnection state: $state');
+        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          _markCallConnected('PeerConnection');
+        }
       };
 
       _peerConnection!.onIceConnectionState = (state) async {
         final stateName = state.toString().split('.').last.replaceAll('RTCIceConnectionState', '').toUpperCase();
         lastIceConnectionState = stateName;
         debugPrint('[WebRTC][DIAG] ICE CONNECTION: $state ($stateName)');
+        ApiService.log('[WebRTC][$currentUserId] ICE CONNECTION STATE: $stateName');
         if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
             state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-          CallAudioTonePlayer.stopAllTones();
-          if (localStream != null) {
-            for (var track in localStream!.getAudioTracks()) {
-              track.enabled = !isMuted;
-            }
-          }
-          if (_peerConnection != null) {
-            _peerConnection!.getSenders().then((senders) {
-              debugPrint('[WebRTC][DIAG] SENDERS count: ${senders.length}');
-              for (var sender in senders) {
-                if (sender.track != null && sender.track!.kind == 'audio') {
-                  sender.track!.enabled = !isMuted;
-                  debugPrint('[WebRTC][DIAG] SENDER TRACK: kind=${sender.track!.kind} enabled=${sender.track!.enabled}');
-                }
-              }
-            }).catchError((_) {});
-            // Diagnostic: check receivers for remote audio
-            _peerConnection!.getReceivers().then((receivers) {
-              debugPrint('[WebRTC][DIAG] RECEIVERS count: ${receivers.length}');
-              for (var receiver in receivers) {
-                if (receiver.track != null) {
-                  debugPrint('[WebRTC][DIAG] RECEIVER TRACK: kind=${receiver.track!.kind} enabled=${receiver.track!.enabled}');
-                }
-              }
-            }).catchError((_) {});
-          }
-          await _applyAudioRouting(isSpeakerOn);
-          debugPrint('[WebRTC][DIAG] AUDIO OUTPUT: ${isSpeakerOn ? "SPEAKER" : "EARPIECE"} | MICROPHONE: ${isMuted ? "DISABLED" : "ENABLED"} | MUTE: ${isMuted ? "ON" : "OFF"}');
-          if (callState != 'connected') {
-            callState = 'connected';
-            statusMessage = null;
-            callStartTime ??= DateTime.now();
-            _startDurationTimer();
-            debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED');
-          }
-          await refreshAudioDiagnostics();
-          notifyListeners();
+          await _markCallConnected('ICE');
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
           if (callState == 'connected') {
             callState = 'reconnecting';
             statusMessage = 'Reconnecting...';
             debugPrint('[WebRTC][DIAG] CALL STATE: RECONNECTING');
+            ApiService.log('[WebRTC][$currentUserId] ICE disconnected, reconnecting...');
             notifyListeners();
           }
         } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
           debugPrint('[WebRTC][DIAG] ICE CONNECTION: FAILED');
+          ApiService.log('[WebRTC][$currentUserId] ICE connection FAILED (NAT/firewall blocked direct & relay)');
           if (callState != 'connected') {
             _transitionToTerminalState('failed');
           }
@@ -601,48 +711,60 @@ class WebRtcService extends ChangeNotifier {
       // Handle remote tracks
       _peerConnection!.onAddStream = (stream) async {
         debugPrint('[WebRTC][DIAG] onAddStream fired — audio tracks count: ${stream.getAudioTracks().length}');
+        ApiService.log('[WebRTC][$currentUserId] onAddStream fired! remote audio tracks: ${stream.getAudioTracks().length}');
         remoteStream = stream;
-        remoteRenderer.srcObject = stream;
-        remoteRenderer.muted = false;
+        try {
+          remoteRenderer.srcObject = stream;
+        } catch (_) {}
         remoteTrackState = 'LIVE';
         WebRtcAudioSink.attachRemoteAudio(stream);
         for (var track in stream.getAudioTracks()) {
           track.enabled = true;
+          try {
+            await Helper.setVolume(1.0, track);
+          } catch (_) {}
           debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onAddStream): kind=${track.kind} enabled=${track.enabled} muted=${track.muted} id=${track.id}');
         }
         await _applyAudioRouting(isSpeakerOn);
-        await refreshAudioDiagnostics();
-        notifyListeners();
+        await _markCallConnected('onAddStream');
       };
       
       _peerConnection!.onTrack = (event) async {
         debugPrint('[WebRTC][DIAG] onTrack fired — track.kind=${event.track.kind} enabled=${event.track.enabled} muted=${event.track.muted} streams=${event.streams.length}');
-        remoteTrackState = (event.track.enabled && !(event.track.muted ?? false)) ? 'LIVE' : 'LIVE';
+        ApiService.log('[WebRTC][$currentUserId] onTrack fired! track.kind=${event.track.kind} enabled=${event.track.enabled}');
+        remoteTrackState = 'LIVE';
         
         if (event.streams.isNotEmpty) {
           remoteStream = event.streams[0];
-          remoteRenderer.srcObject = event.streams[0];
-          remoteRenderer.muted = false;
+          try {
+            remoteRenderer.srcObject = event.streams[0];
+          } catch (_) {}
           WebRtcAudioSink.attachRemoteAudio(event.streams[0]);
           for (var track in event.streams[0].getAudioTracks()) {
             track.enabled = true;
+            try {
+              await Helper.setVolume(1.0, track);
+            } catch (_) {}
             debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack): kind=${track.kind} enabled=${track.enabled} id=${track.id}');
           }
         } else {
           final track = event.track;
           if (track.kind == 'audio') {
             track.enabled = true;
+            try {
+              await Helper.setVolume(1.0, track);
+            } catch (_) {}
             debugPrint('[WebRTC][DIAG] REMOTE AUDIO TRACK (onTrack no stream): kind=${track.kind} enabled=${track.enabled}');
             WebRtcAudioSink.attachRemoteTrack(track);
           }
         }
         await _applyAudioRouting(isSpeakerOn);
-        await refreshAudioDiagnostics();
-        notifyListeners();
+        await _markCallConnected('onTrack');
       };
       return true;
     } catch (e) {
       debugPrint('[WebRTC] PeerConnection init error: $e');
+      ApiService.log('[WebRTC][$currentUserId] PeerConnection init error: $e');
       errorMessage = 'Unable to initialize WebRTC connection.';
       _transitionToTerminalState('failed');
       return false;
@@ -716,13 +838,25 @@ class WebRtcService extends ChangeNotifier {
       });
       await _peerConnection!.setLocalDescription(offer);
 
-      final response = await http.post(
+      // Wait briefly for initial host & STUN candidates to be gathered into localDescription
+      int waited = 0;
+      while (waited < 600) {
+        final curDesc = await _peerConnection!.getLocalDescription();
+        if (curDesc != null && curDesc.sdp != null && curDesc.sdp!.contains('a=candidate')) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 80));
+        waited += 80;
+      }
+      final finalOffer = await _peerConnection!.getLocalDescription() ?? offer;
+
+      final response = await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/create'),
         headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
         body: json.encode({
           'caller_id': currentUserId,
           'callee_id': targetSignalingId,
-          'sdp_offer': offer.sdp,
+          'sdp_offer': finalOffer.sdp,
           'call_type': 'voice',
         }),
       );
@@ -730,6 +864,7 @@ class WebRtcService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         currentCallId = data['call_id']?.toString();
+        ApiService.log('[WebRTC][$currentUserId] Call created: callId=$currentCallId, peer=$targetSignalingId');
         // Flush any candidates gathered during offer creation
         await _flushPendingLocalCandidates();
         callState = 'ringing';
@@ -787,7 +922,7 @@ class WebRtcService extends ChangeNotifier {
       
       // If offer SDP was not in memory, fetch from backend status endpoint
       if (offerSdp == null || offerSdp.isEmpty) {
-        final statusRes = await http.get(
+        final statusRes = await ApiService.client.get(
           Uri.parse('${ApiService.baseUrl}/calls/status?call_id=$currentCallId'),
           headers: {'User-Agent': 'GEBTALK-Client'},
         );
@@ -832,15 +967,27 @@ class WebRtcService extends ChangeNotifier {
       });
       await _peerConnection!.setLocalDescription(answer);
 
+      // Wait briefly for initial host & STUN candidates to be gathered into localDescription
+      int waited = 0;
+      while (waited < 600) {
+        final curDesc = await _peerConnection!.getLocalDescription();
+        if (curDesc != null && curDesc.sdp != null && curDesc.sdp!.contains('a=candidate')) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 80));
+        waited += 80;
+      }
+      final finalAnswer = await _peerConnection!.getLocalDescription() ?? answer;
+
       // Flush any local candidates gathered during answer creation
       await _flushPendingLocalCandidates();
 
-      final acceptRes = await http.post(
+      final acceptRes = await ApiService.client.post(
         Uri.parse('${ApiService.baseUrl}/calls/accept'),
         headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
         body: json.encode({
           'call_id': int.parse(currentCallId!),
-          'sdp_answer': answer.sdp,
+          'sdp_answer': finalAnswer.sdp,
           'device_id': _deviceId,
         }),
       );
@@ -862,17 +1009,14 @@ class WebRtcService extends ChangeNotifier {
           }).catchError((_) {});
         }
 
-        // Default to loudspeaker on Web (browsers have no access to physical top earpiece), or top earpiece on native mobile
-        await _applyAudioRouting(kIsWeb ? true : false);
+        // Default to loudspeaker on mobile & web so talking voice is immediately audible
+        await _applyAudioRouting(true);
 
-        callState = 'connected';
-        statusMessage = null;
-        callStartTime = DateTime.now();
-        _startDurationTimer();
-        _startSignalingPolling();
+        callState = 'connecting';
+        statusMessage = 'Connecting audio stream...';
+        _startSignalingPolling(resetCandidateId: false);
         CallAudioTonePlayer.stopAllTones();
-        CallAudioTonePlayer.playCallConnectedChime();
-        debugPrint('[WebRTC][DIAG] CALL STATE: CONNECTED (receiver side)');
+        ApiService.log('[WebRTC][$currentUserId] Call accepted by callee, waiting for audio connection...');
         notifyListeners();
       } else {
         throw Exception('Server rejected call accept: status ${acceptRes.statusCode}');
@@ -926,7 +1070,7 @@ class WebRtcService extends ChangeNotifier {
         ApiService.cancelCall(int.parse(tempCallId));
       } else {
         try {
-          await http.post(
+          await ApiService.client.post(
             Uri.parse('${ApiService.baseUrl}/calls/end'),
             headers: {'Content-Type': 'application/json', 'User-Agent': 'GEBTALK-Client'},
             body: json.encode({

@@ -2,7 +2,9 @@ package com.example.gebtalk_flutter
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
@@ -13,6 +15,7 @@ import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -21,19 +24,29 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "gebtalk/audio_control"
+    private val BG_CHANNEL = "gebtalk/background_service"
     private val PERMISSION_REQ_CODE = 1001
+    private val TAG = "MainActivity"
+
+    private var bgMethodChannel: MethodChannel? = null
+    private var pendingInitialCall: Map<String, String>? = null
+    private var pendingInitialChat: Map<String, String>? = null
 
     private var audioManager: AudioManager? = null
     private var toneGenerator: ToneGenerator? = null
     private var incomingRingtone: Ringtone? = null
     private var dialToneRunnable: Runnable? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var speakerReapplyRunnable: Runnable? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+        enableLockscreenDisplay()
+        checkNotificationPermission()
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -76,10 +89,145 @@ class MainActivity : FlutterActivity() {
                 }
                 "stopAllTones" -> {
                     stopAllTones()
+                    GebtalkBackgroundService.stopRinging()
                     result.success(true)
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        // Background VoIP & Notification Service Channel
+        bgMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BG_CHANNEL)
+        bgMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startService" -> {
+                    val userId = call.argument<String>("user_id")
+                    val baseUrl = call.argument<String>("base_url")
+                    val token = call.argument<String>("auth_token")
+
+                    val intent = Intent(this, GebtalkBackgroundService::class.java).apply {
+                        putExtra("user_id", userId)
+                        putExtra("base_url", baseUrl)
+                        putExtra("auth_token", token)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(true)
+                }
+                "stopService" -> {
+                    val intent = Intent(this, GebtalkBackgroundService::class.java).apply {
+                        action = GebtalkBackgroundService.ACTION_STOP_SERVICE
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                "setAppForeground" -> {
+                    val isFg = call.argument<Boolean>("is_foreground") ?: true
+                    GebtalkBackgroundService.isAppInForeground = isFg
+                    result.success(true)
+                }
+                "checkInitialCall" -> {
+                    val callData = pendingInitialCall
+                    pendingInitialCall = null
+                    result.success(callData)
+                }
+                "checkInitialChat" -> {
+                    val chatData = pendingInitialChat
+                    pendingInitialChat = null
+                    result.success(chatData)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // Process any launch intent received when activity started
+        handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        GebtalkBackgroundService.isAppInForeground = true
+        GebtalkBackgroundService.instance?.stopRingtoneOnly()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        GebtalkBackgroundService.isAppInForeground = false
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        when (intent.action) {
+            "ACTION_ANSWER_CALL" -> {
+                val callId = intent.getStringExtra("call_id")
+                val callerId = intent.getStringExtra("caller_id")
+                val callerName = intent.getStringExtra("caller_name")
+                if (!callId.isNullOrEmpty()) {
+                    val map = mapOf(
+                        "call_id" to callId,
+                        "caller_id" to (callerId ?: ""),
+                        "caller_name" to (callerName ?: "")
+                    )
+                    pendingInitialCall = map
+                    bgMethodChannel?.invokeMethod("onAnswerCall", map)
+                }
+            }
+            "ACTION_VIEW_CALL" -> {
+                // User clicked notification to view the call screen without auto-answering
+                GebtalkBackgroundService.instance?.stopRingtoneOnly()
+                Log.d(TAG, "Opened incoming call screen (ACTION_VIEW_CALL) without auto-answering")
+            }
+            "ACTION_OPEN_CHAT" -> {
+                val contactId = intent.getStringExtra("contact_id")
+                if (!contactId.isNullOrEmpty()) {
+                    val map = mapOf("contact_id" to contactId)
+                    pendingInitialChat = map
+                    bgMethodChannel?.invokeMethod("onOpenChat", map)
+                }
+            }
+        }
+    }
+
+    private fun enableLockscreenDisplay() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                window.addFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun checkNotificationPermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        1002
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -94,13 +242,14 @@ class MainActivity : FlutterActivity() {
 
     private fun requestAudioFocusForCall() {
         val am = audioManager ?: return
+        if (audioFocusRequest != null) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val playbackAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
-                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                     .setAudioAttributes(playbackAttributes)
                     .setAcceptsDelayedFocusGain(true)
                     .setOnAudioFocusChangeListener { /* maintain VoIP audio state */ }
@@ -109,7 +258,7 @@ class MainActivity : FlutterActivity() {
                 am.requestAudioFocus(request)
             } else {
                 @Suppress("DEPRECATION")
-                am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN)
+                am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -135,7 +284,25 @@ class MainActivity : FlutterActivity() {
         val am = audioManager ?: return
         try {
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            requestAudioFocusForCall()
+
+            // Guarantee hardware microphone is NOT muted
+            try {
+                am.isMicrophoneMute = false
+            } catch (me: Exception) {}
+
+            // Ensure voice call and music stream volumes are audible (at least 90% of max volume)
+            try {
+                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                val curVol = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+                if (curVol < (maxVol * 0.70).toInt()) {
+                    am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, (maxVol * 0.90).toInt(), 0)
+                }
+                val musicMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val musicCur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                if (musicCur < (musicMax * 0.70).toInt()) {
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, (musicMax * 0.90).toInt(), 0)
+                }
+            } catch (ve: Exception) {}
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val devices = am.availableCommunicationDevices
@@ -168,9 +335,9 @@ class MainActivity : FlutterActivity() {
                 am.isSpeakerphoneOn = isSpeaker
             }
 
-            // Re-apply after short delays to prevent race conditions with flutter_webrtc's
-            // internal audio session setup that might inadvertently reset routing to speaker.
-            val reapplyRunnable = Runnable {
+            // Cancel any previous re-apply to prevent stale device routing races
+            speakerReapplyRunnable?.let { mainHandler.removeCallbacks(it) }
+            speakerReapplyRunnable = Runnable {
                 try {
                     if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
                         am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -200,9 +367,7 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Exception) {}
             }
 
-            mainHandler.postDelayed(reapplyRunnable, 150)
-            mainHandler.postDelayed(reapplyRunnable, 450)
-            mainHandler.postDelayed(reapplyRunnable, 1000)
+            speakerReapplyRunnable?.let { mainHandler.postDelayed(it, 250) }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -212,6 +377,10 @@ class MainActivity : FlutterActivity() {
         val am = audioManager ?: return
         try {
             stopAllTones()
+            speakerReapplyRunnable?.let {
+                mainHandler.removeCallbacks(it)
+                speakerReapplyRunnable = null
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 am.clearCommunicationDevice()
             }
@@ -232,9 +401,8 @@ class MainActivity : FlutterActivity() {
             am?.mode = AudioManager.MODE_IN_COMMUNICATION
             applySpeakerphone(false) // Default outgoing ringback to top earpiece receiver
 
-            // Cadenced ringback tone: 1.2s tone on, 2.8s tone off
-            // This prevents continuous mixer overload and keeps hardware Acoustic Echo Canceller clean
-            toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
+            // Use STREAM_NOTIFICATION so STREAM_VOICE_CALL is never locked when WebRTC's AudioTrack starts
+            toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
             var isTonePlaying = false
 
             dialToneRunnable = object : Runnable {
@@ -255,7 +423,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
-            mainHandler.post(dialToneRunnable!!)
+            dialToneRunnable?.let { mainHandler.post(it) }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -274,7 +442,7 @@ class MainActivity : FlutterActivity() {
             e.printStackTrace()
             // Fallback to ToneGenerator if RingtoneManager fails
             try {
-                toneGenerator = ToneGenerator(AudioManager.STREAM_RING, 85)
+                toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 85)
                 toneGenerator?.startTone(ToneGenerator.TONE_CDMA_HIGH_L, -1)
             } catch (e: Exception) {}
         }
@@ -283,13 +451,14 @@ class MainActivity : FlutterActivity() {
     private fun playCallConnectedChime() {
         stopAllTones()
         try {
-            val tg = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
-            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
+            // Use STREAM_NOTIFICATION so STREAM_VOICE_CALL is never locked when WebRTC's AudioTrack starts
+            val tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
             mainHandler.postDelayed({
                 try {
                     tg.release()
                 } catch (e: Exception) {}
-            }, 300)
+            }, 250)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -298,7 +467,7 @@ class MainActivity : FlutterActivity() {
     private fun playCallEndedTone() {
         stopAllTones()
         try {
-            val tg = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 80)
+            val tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
             tg.startTone(ToneGenerator.TONE_SUP_BUSY, 700)
             mainHandler.postDelayed({
                 try {
@@ -324,6 +493,7 @@ class MainActivity : FlutterActivity() {
             incomingRingtone?.stop()
             incomingRingtone = null
         } catch (e: Exception) {}
+        abandonAudioFocusForCall()
     }
 
     override fun onDestroy() {
