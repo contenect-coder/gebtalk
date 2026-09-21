@@ -88,8 +88,16 @@ class SQLiteConnectionWrapper:
     def __init__(self, db_path=None):
         if db_path is None:
             db_path = os.path.join(os.path.dirname(__file__), 'gebtalk.db')
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10.0)
         self._conn.row_factory = sqlite3.Row
+        try:
+            self._conn.execute("PRAGMA journal_mode = WAL;")
+            self._conn.execute("PRAGMA synchronous = NORMAL;")
+            self._conn.execute("PRAGMA cache_size = -64000;")
+            self._conn.execute("PRAGMA temp_store = MEMORY;")
+            self._conn.execute("PRAGMA busy_timeout = 5000;")
+        except Exception:
+            pass
         self.closed = 0
 
     def cursor(self):
@@ -972,6 +980,14 @@ def init_db(seed_test_data=False):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts (phone);')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts (email);')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_contact_id ON messages (contact_id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_contact_id_id ON messages (contact_id, id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_webrtc_calls_callee_status ON webrtc_calls (callee_id, status);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_webrtc_calls_caller ON webrtc_calls (caller_id);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_folder ON contacts (folder);')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_contacts_assigned ON contacts (assigned_staff_id);')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_typing_contact ON typing_indicators (contact_id);')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_presence_user ON user_presence (user_id);')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_archived_user ON archived_chats (user_id);')

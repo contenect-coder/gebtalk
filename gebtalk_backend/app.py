@@ -2127,49 +2127,81 @@ def is_call_authorized(caller_id, callee_id):
 
     return False
 
+_cached_metered_creds = None
+_cached_metered_time = 0
+
+def fetch_live_metered_turn():
+    global _cached_metered_creds, _cached_metered_time
+    now = time.time()
+    if _cached_metered_creds and (now - _cached_metered_time) < 1800:
+        return _cached_metered_creds
+    try:
+        url = 'https://gebtalk.metered.live/api/v1/turn/credentials?apiKey=6aa4ce15196065e58f369077f251bcecc4a3'
+        req = urllib.request.Request(url, headers={'User-Agent': 'GebTalk-Backend'})
+        with urllib.request.urlopen(req, timeout=3) as res:
+            if res.status == 200:
+                data = json.loads(res.read().decode())
+                if isinstance(data, list) and len(data) > 0:
+                    _cached_metered_creds = data
+                    _cached_metered_time = now
+                    return data
+    except Exception as e:
+        print(f"[TURN Cache Warning]: {e}", flush=True)
+    return _cached_metered_creds
+
 @app.route('/api/calls/config', methods=['GET'])
 def get_webrtc_config():
+    """Returns verified high-performance STUN and TURN server configurations for WebRTC."""
     stun_url = os.environ.get('STUN_SERVER_URL', 'stun:stun.l.google.com:19302')
     turn_url = os.environ.get('TURN_SERVER_URL')
     turn_username = os.environ.get('TURN_USERNAME')
     turn_password = os.environ.get('TURN_PASSWORD')
     
-    ice_servers: list[dict] = [
+    ice_servers = [
         {
             'urls': [
                 stun_url,
                 'stun:stun1.l.google.com:19302',
                 'stun:stun2.l.google.com:19302',
-                'stun:stun3.l.google.com:19302',
-                'stun:stun4.l.google.com:19302',
-                'stun:stun.services.mozilla.com',
                 'stun:stun.cloudflare.com:3478',
-                'stun:stun.sipgate.net:3478',
-                'stun:global.stun.twilio.com:3478'
+                'stun:global.stun.twilio.com:3478',
+                'stun:stun.voip.blackberry.com:3478',
             ]
-        },
-        {
-            'urls': [
-                'turn:openrelay.metered.ca:80',
-                'turn:openrelay.metered.ca:443',
-                'turn:openrelay.metered.ca:443?transport=tcp',
-                'turns:openrelay.metered.ca:443?transport=tcp'
-            ],
-            'username': 'openrelayproject',
-            'credential': 'openrelayproject'
         }
     ]
+    
+    # Fetch live verified global TURN servers
+    live_turn = fetch_live_metered_turn()
+    if live_turn:
+        for entry in live_turn:
+            e = dict(entry)
+            if isinstance(e.get('urls'), str):
+                e['urls'] = [e['urls']]
+            ice_servers.append(e)
+    else:
+        ice_servers.append({
+            'urls': [
+                'turns:global.relay.metered.ca:443?transport=tcp',
+                'turn:global.relay.metered.ca:443',
+                'turn:global.relay.metered.ca:80?transport=tcp',
+                'turn:global.relay.metered.ca:80',
+            ],
+            'username': 'ba0a081a6cd831d64516c6ab',
+            'credential': 'QELoKNYxJHSQ54mp',
+        })
+
     if turn_url:
-        turn_entry: dict = {'urls': [turn_url]}
+        turn_entry = {'urls': [turn_url]}
         if turn_username: turn_entry['username'] = turn_username
         if turn_password: turn_entry['credential'] = turn_password
         ice_servers.append(turn_entry)
         
     return jsonify({
         'iceServers': ice_servers,
+        'iceCandidatePoolSize': 2,
+        'bundlePolicy': 'max-bundle',
+        'rtcpMuxPolicy': 'require',
         'sdpSemantics': 'unified-plan',
-        'bundlePolicy': 'balanced',
-        'iceCandidatePoolSize': 4
     })
 
 # ========== BACKGROUND VOIP DEVICE REGISTRATION ENDPOINTS ==========
@@ -2377,40 +2409,36 @@ def create_call():
     
     return jsonify({'call_id': call_id, 'status': 'ringing', 'call_type': call_type})
 
-@app.route('/api/calls/incoming', methods=['GET'])
-def get_incoming_calls():
-    callee_id = request.args.get('callee_id')
-    if not callee_id:
-        return jsonify({'error': 'Missing callee_id'}), 400
-        
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    possible_ids = {callee_id, callee_id.lower()}
-    
-    # Resolve aliases across user_profile, users, and contacts
-    cursor.execute('SELECT id, phone, email, username FROM users WHERE id = %s OR email = %s OR username = %s OR phone = %s', (callee_id, callee_id, callee_id, callee_id))
+_user_aliases_cache = {}
+
+def get_resolved_user_aliases(user_id, cursor):
+    now = time.time()
+    cached = _user_aliases_cache.get(user_id)
+    if cached and (now - cached[0]) < 60:
+        return cached[1]
+
+    possible_ids = {user_id, user_id.lower()}
+    cursor.execute('SELECT id, phone, email, username FROM users WHERE id = %s OR email = %s OR username = %s OR phone = %s', (user_id, user_id, user_id, user_id))
     for u_row in cursor.fetchall():
         for k in ('id', 'phone', 'email', 'username'):
             if u_row.get(k):
                 possible_ids.add(str(u_row[k]))
                 possible_ids.add(str(u_row[k]).lower())
             
-    cursor.execute('SELECT id, phone, email FROM user_profile WHERE id = %s OR phone = %s OR email = %s', (callee_id, callee_id, callee_id))
+    cursor.execute('SELECT id, phone, email FROM user_profile WHERE id = %s OR phone = %s OR email = %s', (user_id, user_id, user_id))
     for up_row in cursor.fetchall():
         for k in ('id', 'phone', 'email'):
             if up_row.get(k):
                 possible_ids.add(str(up_row[k]))
                 possible_ids.add(str(up_row[k]).lower())
         
-    cursor.execute('SELECT id, phone, email, username FROM contacts WHERE id = %s OR phone = %s OR email = %s', (callee_id, callee_id, callee_id))
+    cursor.execute('SELECT id, phone, email, username FROM contacts WHERE id = %s OR phone = %s OR email = %s', (user_id, user_id, user_id))
     for c_row in cursor.fetchall():
         for k in ('id', 'phone', 'email', 'username'):
             if c_row.get(k):
                 possible_ids.add(str(c_row[k]))
                 possible_ids.add(str(c_row[k]).lower())
                 
-    # Pass 2: Expand all emails and phones found to find any linked contact/user IDs
     known_emails = [e for e in possible_ids if '@' in e]
     for em in known_emails:
         cursor.execute('SELECT id FROM contacts WHERE LOWER(email) = %s', (em.lower(),))
@@ -2425,6 +2453,19 @@ def get_incoming_calls():
                 possible_ids.add(str(r['id']).lower())
                     
     ids_list = list(possible_ids)
+    _user_aliases_cache[user_id] = (now, ids_list)
+    return ids_list
+
+
+@app.route('/api/calls/incoming', methods=['GET'])
+def get_incoming_calls():
+    callee_id = request.args.get('callee_id')
+    if not callee_id:
+        return jsonify({'error': 'Missing callee_id'}), 400
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    ids_list = get_resolved_user_aliases(callee_id, cursor)
     if not ids_list:
         conn.close()
         return jsonify(None), 200
@@ -2493,6 +2534,134 @@ def get_incoming_calls():
         
     conn.close()
     return jsonify(None), 200
+
+@app.route('/api/notifications/poll', methods=['GET'])
+def poll_user_notifications():
+    user_id = request.args.get('user_id')
+    last_msg_id = request.args.get('last_msg_id', type=int)
+    active_call_id = request.args.get('active_call_id')
+    
+    if not user_id:
+        return jsonify({'error': 'Missing user_id parameter'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    ids_list = get_resolved_user_aliases(user_id, cursor)
+    placeholders = ','.join(['%s'] * len(ids_list))
+    
+    # 1. Check for incoming ringing calls
+    incoming_call = None
+    cursor.execute(f'''
+        SELECT id, caller_id, callee_id, sdp_offer, status, created_at
+        FROM webrtc_calls
+        WHERE callee_id IN ({placeholders}) AND status = 'ringing'
+        ORDER BY created_at DESC
+        LIMIT 1
+    ''', ids_list)
+    call_row = cursor.fetchone()
+    
+    if call_row:
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        created_at = call_row['created_at']
+        if isinstance(created_at, str):
+            try: created_at = datetime.fromisoformat(created_at)
+            except Exception: created_at = datetime.now(timezone.utc)
+        if hasattr(created_at, 'tzinfo') and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        elapsed = (now - created_at).total_seconds()
+        
+        if elapsed > 60:
+            cursor.execute("UPDATE webrtc_calls SET status = 'ended' WHERE id = %s", (call_row['id'],))
+            cursor.execute("DELETE FROM webrtc_candidates WHERE call_id = %s", (call_row['id'],))
+            conn.commit()
+            log_call_in_messages(call_row['id'], call_row['caller_id'], call_row['callee_id'], 0, False)
+        else:
+            caller_name = call_row['caller_id']
+            caller_avatar = ""
+            cursor.execute('SELECT name, avatar FROM users WHERE id = %s OR email = %s OR username = %s', (call_row['caller_id'], call_row['caller_id'], call_row['caller_id']))
+            u_caller = cursor.fetchone()
+            if u_caller:
+                caller_name = u_caller.get('name') or caller_name
+                caller_avatar = u_caller.get('avatar') or ''
+            else:
+                cursor.execute('SELECT name, avatar FROM user_profile WHERE id = %s', (call_row['caller_id'],))
+                up_caller = cursor.fetchone()
+                if up_caller:
+                    caller_name = up_caller.get('name') or caller_name
+                    caller_avatar = up_caller.get('avatar') or ''
+                else:
+                    cursor.execute('SELECT name, avatar FROM contacts WHERE id = %s', (call_row['caller_id'],))
+                    c_caller = cursor.fetchone()
+                    if c_caller:
+                        caller_name = c_caller.get('name') or caller_name
+                        caller_avatar = c_caller.get('avatar') or ''
+                        
+            incoming_call = {
+                'call_id': call_row['id'],
+                'caller_id': call_row['caller_id'],
+                'caller_name': caller_name,
+                'caller_avatar': caller_avatar,
+                'call_type': 'voice',
+                'status': 'ringing'
+            }
+
+    # 2. Check status of previous active call (e.g. if cancelled/ended)
+    call_status = None
+    if active_call_id:
+        cursor.execute('SELECT id, status FROM webrtc_calls WHERE id = %s', (active_call_id,))
+        act_row = cursor.fetchone()
+        if act_row:
+            call_status = {'call_id': act_row['id'], 'status': act_row['status']}
+
+    # 3. Check for new unread messages
+    new_messages = []
+    cursor.execute('SELECT COALESCE(MAX(id), 0) as max_id FROM messages')
+    max_row = cursor.fetchone()
+    db_max_id = max_row['max_id'] if max_row else 0
+
+    if not last_msg_id or last_msg_id <= 0:
+        # First-time sync: establish baseline, do not spam historical messages
+        max_id = db_max_id
+    else:
+        # Subsequent syncs: return only messages strictly newer than last_msg_id
+        max_id = max(last_msg_id, db_max_id)
+        try:
+            msg_query = '''
+                SELECT m.id, m.contact_id, m.text, m.time, m.status, c.name as contact_name
+                FROM messages m
+                LEFT JOIN contacts c ON m.contact_id = c.id
+                WHERE m.is_user = FALSE 
+                  AND m.id > %s
+                  AND m.status != 'read'
+                ORDER BY m.id ASC
+                LIMIT 20
+            '''
+            cursor.execute(msg_query, (last_msg_id,))
+            for m_row in cursor.fetchall():
+                m_id = m_row['id']
+                if m_id > max_id:
+                    max_id = m_id
+                new_messages.append({
+                    'id': m_id,
+                    'contact_id': m_row['contact_id'],
+                    'sender_name': m_row.get('contact_name') or m_row['contact_id'],
+                    'text': m_row.get('text') or 'New message',
+                    'time': m_row.get('time') or ''
+                })
+        except Exception as e:
+            print(f"[POLL NOTIFICATIONS ERROR] {e}")
+
+    conn.close()
+    return jsonify({
+        'incoming_call': incoming_call,
+        'call_status': call_status,
+        'new_messages': new_messages,
+        'max_msg_id': max_id,
+        'timestamp': int(time.time())
+    })
+
 
 @app.route('/api/calls/accept', methods=['POST'])
 def accept_call():
@@ -2613,6 +2782,7 @@ def get_call_status():
     conn.close()
     return jsonify({'status': 'ended'}), 200
 
+
 @app.route('/api/calls/ice-candidate', methods=['POST'])
 def add_ice_candidate():
     data = request.json or {}
@@ -2629,9 +2799,31 @@ def add_ice_candidate():
         INSERT INTO webrtc_candidates (call_id, sender_id, candidate)
         VALUES (%s, %s, %s)
     ''', (call_id, sender_id, candidate))
+    # Also archive into persistent candidate log for forensics
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS webrtc_candidates_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                call_id INTEGER,
+                sender_id TEXT,
+                candidate TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            INSERT INTO webrtc_candidates_log (call_id, sender_id, candidate)
+            VALUES (%s, %s, %s)
+        ''', (call_id, sender_id, candidate))
+    except Exception as ae:
+        pass
     conn.commit()
     conn.close()
     
+    if isinstance(candidate, (dict, list)):
+        candidate = json.dumps(candidate)
+        
+    cand_summary = candidate[:100] if isinstance(candidate, str) else str(candidate)[:100]
+    print(f"[ICE] Saved candidate for call {call_id} from {sender_id}: {cand_summary}", flush=True)
     return jsonify({'success': True})
 
 @app.route('/api/calls/ice-candidates', methods=['GET'])
