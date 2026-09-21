@@ -6,6 +6,7 @@
   to = "https://sharper-prevent-psychic.ngrok-free.dev/api/:splat"
   status = 200
   force = true
+  headers = {Bypass-Tunnel-Reminder = "true", bypass-tunnel-reminder = "true", ngrok-skip-browser-warning = "true"}
 
 [[redirects]]
   from = "/*"

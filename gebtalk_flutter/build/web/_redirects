@@ -1,0 +1,2 @@
+/api/* https://sharper-prevent-psychic.ngrok-free.dev/api/:splat 200! Bypass-Tunnel-Reminder=true bypass-tunnel-reminder=true ngrok-skip-browser-warning=true
+/* /index.html 200
