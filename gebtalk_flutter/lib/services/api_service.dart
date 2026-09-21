@@ -12,7 +12,7 @@ class ApiService {
   static final http.Client client = http.Client();
   static final http.Client _client = client;
 
-  static const String defaultFallbackUrl = 'https://commission-livecam-able-condition.trycloudflare.com/api';
+  static const String defaultFallbackUrl = 'https://sharper-prevent-psychic.ngrok-free.dev/api';
   static const String defaultLocalUrl = 'http://192.168.1.22:5000/api';
   static String? lastDetailedError;
   static String? lastAuthError;

@@ -3,7 +3,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://commission-livecam-able-condition.trycloudflare.com/api/:splat"
+  to = "https://sharper-prevent-psychic.ngrok-free.dev/api/:splat"
   status = 200
   force = true
 

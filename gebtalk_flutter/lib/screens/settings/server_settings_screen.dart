@@ -18,7 +18,7 @@ class _ServerSettingsScreenState extends State<ServerSettingsScreen> {
   bool? _isOnline;
   String? _testMessage;
 
-  static const String liveTunnelUrl = 'https://commission-livecam-able-condition.trycloudflare.com/api';
+  static const String liveTunnelUrl = 'https://sharper-prevent-psychic.ngrok-free.dev/api';
   static const String localWifiUrl = 'http://192.168.1.22:5000/api';
 
   @override

@@ -1,6 +1,6 @@
 @echo off
 REM ===================================================
-REM GEBTALK Complete Permanent Server Runner
+REM GEBTALK Permanent Server Runner (ngrok static domain)
 REM ===================================================
 
 REM 1. Update DuckDNS Domain IP automatically
@@ -15,14 +15,14 @@ if "%ERRORLEVEL%"=="1" (
 
 timeout /t 2 /nobreak >nul
 
-REM 3. Start GEBTALK Web App Server on port 8080 (if not running)
+REM 3. Start GEBTALK Web App Server on port 8080
 cd /d "D:\EB GLOBAL APP"
 start "" /B "D:\EB GLOBAL APP\gebtalk_backend\.venv\Scripts\python.exe" web_server.py
 
 timeout /t 2 /nobreak >nul
 
-REM 4. Start Cloudflare Tunnel for Mobile App connectivity (if not running)
-tasklist /FI "IMAGENAME eq cloudflared.exe" 2>NUL | find /I /N "cloudflared.exe">NUL
+REM 4. Start ngrok with PERMANENT static domain (never changes!)
+tasklist /FI "IMAGENAME eq ngrok.exe" 2>NUL | find /I /N "ngrok.exe">NUL
 if "%ERRORLEVEL%"=="1" (
-    start "" /B cloudflared tunnel --url http://127.0.0.1:5000 --logfile "D:\EB GLOBAL APP\tunnel.log"
+    start "" /B "C:\Users\pravi\AppData\AndroidCLI\ngrok.exe" http --url=sharper-prevent-psychic.ngrok-free.dev 5000
 )
