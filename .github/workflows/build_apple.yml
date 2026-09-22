@@ -48,9 +48,9 @@ jobs:
           rm -rf dmg_temp
           
           # Move artifacts to root dist folder
-          mkdir -p ../../../../../dist
-          cp GEBTALK-macOS.dmg ../../../../../dist/
-          cp GEBTALK-macOS.zip ../../../../../dist/
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp GEBTALK-macOS.dmg "$GITHUB_WORKSPACE/dist/"
+          cp GEBTALK-macOS.zip "$GITHUB_WORKSPACE/dist/"
 
       - name: Build iOS App (Unsigned for Sideloading)
         run: |
@@ -66,8 +66,8 @@ jobs:
           rm -rf Payload
           
           # Move IPA to root dist folder
-          mkdir -p ../../../../dist
-          cp gebtalk-ios.ipa ../../../../dist/
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp gebtalk-ios.ipa "$GITHUB_WORKSPACE/dist/"
 
       - name: Upload Artifacts to Workflow
         uses: actions/upload-artifact@v4
