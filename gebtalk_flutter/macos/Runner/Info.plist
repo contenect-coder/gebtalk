@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>GEBTALK requires access to your microphone for high-definition internet voice calling.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>GEBTALK requires access to your camera for profile pictures and video communication.</string>
 </dict>
 </plist>

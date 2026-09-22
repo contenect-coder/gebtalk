@@ -1,0 +1,90 @@
+name: Build Apple Apps (macOS & iOS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-apple:
+    name: Build macOS DMG and iOS IPA
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          cd gebtalk_flutter
+          flutter pub get
+
+      - name: Build macOS App
+        run: |
+          cd gebtalk_flutter
+          flutter build macos --release
+
+      - name: Package macOS DMG & ZIP
+        run: |
+          cd gebtalk_flutter/build/macos/Build/Products/Release
+          
+          # Create ZIP archive
+          zip -r -y GEBTALK-macOS.zip gebtalk_flutter.app
+          
+          # Create DMG with Applications drag-and-drop link
+          mkdir -p dmg_temp
+          cp -R gebtalk_flutter.app dmg_temp/GEBTALK.app
+          ln -s /Applications dmg_temp/Applications
+          hdiutil create -volname "GEBTALK" -srcfolder dmg_temp -ov -format UDZO GEBTALK-macOS.dmg
+          rm -rf dmg_temp
+          
+          # Move artifacts to root dist folder
+          mkdir -p ../../../../../dist
+          cp GEBTALK-macOS.dmg ../../../../../dist/
+          cp GEBTALK-macOS.zip ../../../../../dist/
+
+      - name: Build iOS App (Unsigned for Sideloading)
+        run: |
+          cd gebtalk_flutter
+          flutter build ios --release --no-codesign
+
+      - name: Package iOS IPA
+        run: |
+          cd gebtalk_flutter/build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          zip -r -y gebtalk-ios.ipa Payload
+          rm -rf Payload
+          
+          # Move IPA to root dist folder
+          mkdir -p ../../../../dist
+          cp gebtalk-ios.ipa ../../../../dist/
+
+      - name: Upload Artifacts to Workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: gebtalk-apple-builds
+          path: dist/*
+          retention-days: 30
+
+      - name: Publish to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Determine target tag (release tag or default to v1.0.6)
+          TARGET_TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TARGET_TAG" =~ ^v ]]; then
+            TARGET_TAG="v1.0.6"
+          fi
+          
+          echo "Uploading assets to release: $TARGET_TAG"
+          gh release upload "$TARGET_TAG" dist/* --clobber || true
