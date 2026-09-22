@@ -10,9 +10,12 @@
 - **Permanent Server URL (ngrok Static Domain)**:
   - Backend API: `https://sharper-prevent-psychic.ngrok-free.dev/api`
   - Health check: `https://sharper-prevent-psychic.ngrok-free.dev/api/health`
-- **APK Download Links**:
-  - Direct High-Speed GitHub Release (Recommended, no interstitial): `https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/gebtalk.apk`
-  - Backend Uploads Server: `https://sharper-prevent-psychic.ngrok-free.dev/uploads/gebtalk.apk`
+- **Release Download Links (Multi-Platform)**:
+  - **Android APK**: `https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/gebtalk.apk`
+  - **macOS DMG Installer**: `https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/GEBTALK-macOS.dmg`
+  - **macOS ZIP Package**: `https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/GEBTALK-macOS.zip`
+  - **iPhone (iOS) Sideloadable IPA**: `https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/gebtalk-ios.ipa`
+  - **Web App (PWA for iOS/Mac/PC)**: `https://contenect-coder.github.io/gebtalk/`
 - **Key Mobile Configurations & Fixes Applied**:
   - **Native Android Foreground VoIP & Notification Service (`GebtalkBackgroundService.kt`)**: Added persistent Android foreground service with `phoneCall|dataSync` types, persistent sticky lifecycle, and boot receiver (`BootReceiver.kt`) to ensure incoming calls and chat notifications are received even when the app is completely closed or screen is locked.
   - **Heads-Up & Lockscreen Call Alerts**: Implemented high-priority incoming call notification channel with native ringtone loop, vibration, and interactive `ANSWER` / `DECLINE` notification buttons (`CallActionReceiver.kt`).
