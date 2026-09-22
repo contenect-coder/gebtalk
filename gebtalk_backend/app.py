@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, g
+from flask import Flask, request, jsonify, send_from_directory, g, Response
 from flask_cors import CORS  # type: ignore
 import os
 import json
@@ -65,6 +65,75 @@ def serve_uploaded_file(filename):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response
+
+@app.route('/', methods=['GET'])
+@app.route('/api', methods=['GET'])
+@app.route('/api/', methods=['GET'])
+def api_index():
+    accept = request.headers.get('Accept', '')
+    if 'text/html' in accept:
+        html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GEBTALK Backend Server - Online</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        body { background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; max-width: 520px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); text-align: center; }
+        .badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 6px 14px; border-radius: 9999px; font-weight: 600; font-size: 14px; margin-bottom: 20px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+        h1 { font-size: 26px; font-weight: 700; margin-bottom: 8px; color: #ffffff; }
+        p.sub { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+        .info-box { background: #0f172a; border-radius: 12px; padding: 16px; text-align: left; font-size: 13px; color: #cbd5e1; margin-bottom: 24px; border: 1px solid #334155; }
+        .info-box p { margin-bottom: 6px; display: flex; justify-content: space-between; }
+        .info-box span.val { font-family: monospace; color: #38bdf8; }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn { display: inline-block; padding: 12px; border-radius: 10px; font-weight: 600; font-size: 13px; text-decoration: none; transition: 0.2s; text-align: center; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary { background: #334155; color: #f1f5f9; }
+        .btn-secondary:hover { background: #475569; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="badge"><span class="dot"></span> Permanent Server Online</div>
+        <h1>GEBTALK API</h1>
+        <p class="sub">The backend service is healthy, operational, and receiving connections.</p>
+        
+        <div class="info-box">
+            <p><span>Service:</span> <span class="val">gebtalk_backend</span></p>
+            <p><span>Status:</span> <span class="val" style="color:#4ade80;">200 OK (Healthy)</span></p>
+            <p><span>Version:</span> <span class="val">v1.0.6</span></p>
+            <p><span>Permanent Domain:</span> <span class="val">sharper-prevent-psychic.ngrok-free.dev</span></p>
+            <p><span>Health Check:</span> <span class="val"><a href="/api/health" style="color:#38bdf8;">/api/health</a></span></p>
+        </div>
+
+        <div class="btn-grid">
+            <a href="https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/gebtalk.apk" class="btn btn-primary">Android APK</a>
+            <a href="https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/GEBTALK-macOS.dmg" class="btn btn-secondary">macOS DMG</a>
+            <a href="https://github.com/contenect-coder/gebtalk/releases/download/v1.0.6/gebtalk-ios.ipa" class="btn btn-secondary">iPhone IPA</a>
+            <a href="https://contenect-coder.github.io/gebtalk/" class="btn btn-primary">Web App</a>
+        </div>
+    </div>
+</body>
+</html>"""
+        return Response(html, mimetype='text/html')
+
+    return jsonify({
+        "status": "ok",
+        "service": "gebtalk_backend",
+        "message": "GEBTALK API is live and operational",
+        "version": "1.0.6",
+        "timestamp": int(time.time()),
+        "endpoints": {
+            "health": "/api/health",
+            "calls": "/api/calls/config",
+            "notifications": "/api/notifications/poll"
+        }
+    })
 
 @app.route('/api/health', methods=['GET'])
 @app.route('/health', methods=['GET'])
