@@ -12,8 +12,8 @@ class ApiService {
   static final http.Client client = http.Client();
   static final http.Client _client = client;
 
-  static const String defaultFallbackUrl = 'https://gebtalk-backend.onrender.com/api';
-  static const String defaultDevTunnelUrl = 'https://sharper-prevent-psychic.ngrok-free.dev/api';
+  static const String defaultFallbackUrl = 'https://sharper-prevent-psychic.ngrok-free.dev/api';
+  static const String defaultCloudUrl = 'https://gebtalk-backend.onrender.com/api';
   static const String defaultLocalUrl = 'http://192.168.1.22:5000/api';
   static String? lastDetailedError;
   static String? lastAuthError;
@@ -31,13 +31,13 @@ class ApiService {
 
   static List<String> get candidateUrls {
     final list = <String>[];
-    // 1. Production cloud server is ALWAYS first priority
+    // 1. Active permanent live tunnel is ALWAYS first priority
     if (defaultFallbackUrl.isNotEmpty && !list.contains(defaultFallbackUrl)) {
       list.add(defaultFallbackUrl);
     }
-    // 2. Development tunnel fallback
-    if (defaultDevTunnelUrl.isNotEmpty && !list.contains(defaultDevTunnelUrl)) {
-      list.add(defaultDevTunnelUrl);
+    // 2. Secondary cloud URL
+    if (defaultCloudUrl.isNotEmpty && !list.contains(defaultCloudUrl)) {
+      list.add(defaultCloudUrl);
     }
     // 3. Custom user-set URL (if set and not duplicate)
     final current = _customBaseUrl ?? '';
