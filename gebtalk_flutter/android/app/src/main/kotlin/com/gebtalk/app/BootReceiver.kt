@@ -1,4 +1,4 @@
-package com.example.gebtalk_flutter
+package com.gebtalk.app
 
 import android.content.BroadcastReceiver
 import android.content.Context

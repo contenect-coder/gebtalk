@@ -7,6 +7,7 @@ import urllib.request
 import base64
 from datetime import datetime
 from functools import wraps
+from typing import Any
 import database
 from email_service import EmailService
 from push_service import PushService
@@ -1361,7 +1362,8 @@ def create_contact():
     conn.commit()
 
     cursor.execute('SELECT * FROM contacts WHERE id = %s', (contact_id,))
-    new_contact = dict(cursor.fetchone())
+    row = cursor.fetchone()
+    new_contact: dict[str, Any] = dict(row) if row else {}
     new_contact['tags'] = []
 
     conn.close()
@@ -1400,7 +1402,8 @@ def create_staff():
     conn.commit()
     
     cursor.execute('SELECT * FROM contacts WHERE id = %s', (staff_id,))
-    new_staff = dict(cursor.fetchone())
+    row = cursor.fetchone()
+    new_staff: dict[str, Any] = dict(row) if row else {}
     new_staff['tags'] = []
     
     conn.close()
@@ -1777,9 +1780,11 @@ def send_broadcast():
                 RETURNING id
             ''', (rid, text, time_str, is_file, file_name, file_size))
             
-            msg_id = cursor.fetchone()['id']
+            res = cursor.fetchone()
+            msg_id = res['id'] if res else None
             # Launch status simulation thread for each broadcast message
-            threading.Thread(target=simulate_message_status_updates, args=(msg_id,), daemon=True).start()
+            if msg_id:
+                threading.Thread(target=simulate_message_status_updates, args=(msg_id,), daemon=True).start()
             
             cursor.execute('UPDATE contacts SET unread_count = unread_count + 1 WHERE id = %s', (rid,))
             delivered_count += 1
@@ -2226,7 +2231,7 @@ def get_webrtc_config():
     turn_username = os.environ.get('TURN_USERNAME')
     turn_password = os.environ.get('TURN_PASSWORD')
     
-    ice_servers = [
+    ice_servers: list[dict[str, Any]] = [
         {
             'urls': [
                 stun_url,
@@ -2243,7 +2248,7 @@ def get_webrtc_config():
     live_turn = fetch_live_metered_turn()
     if live_turn:
         for entry in live_turn:
-            e = dict(entry)
+            e: dict[str, Any] = dict(entry)
             if isinstance(e.get('urls'), str):
                 e['urls'] = [e['urls']]
             ice_servers.append(e)
@@ -2260,7 +2265,7 @@ def get_webrtc_config():
         })
 
     if turn_url:
-        turn_entry = {'urls': [turn_url]}
+        turn_entry: dict[str, Any] = {'urls': [turn_url]}
         if turn_username: turn_entry['username'] = turn_username
         if turn_password: turn_entry['credential'] = turn_password
         ice_servers.append(turn_entry)

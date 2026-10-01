@@ -1,4 +1,4 @@
-package com.example.gebtalk_flutter
+package com.gebtalk.app
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -13,8 +13,8 @@ import kotlin.concurrent.thread
 class CallActionReceiver : BroadcastReceiver() {
 
     companion object {
-        const val ACTION_ANSWER = "com.example.gebtalk_flutter.ACTION_ANSWER"
-        const val ACTION_DECLINE = "com.example.gebtalk_flutter.ACTION_DECLINE"
+        const val ACTION_ANSWER = "com.gebtalk.app.ACTION_ANSWER"
+        const val ACTION_DECLINE = "com.gebtalk.app.ACTION_DECLINE"
         private const val TAG = "CallActionReceiver"
     }
 

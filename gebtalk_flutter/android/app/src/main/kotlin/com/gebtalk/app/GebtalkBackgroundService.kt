@@ -1,4 +1,4 @@
-package com.example.gebtalk_flutter
+package com.gebtalk.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -41,9 +41,9 @@ class GebtalkBackgroundService : Service() {
         const val PREF_AUTH_TOKEN = "pref_auth_token"
         const val PREF_LAST_MSG_ID = "pref_last_msg_id"
 
-        const val ACTION_START_SERVICE = "com.example.gebtalk_flutter.START_SERVICE"
-        const val ACTION_STOP_SERVICE = "com.example.gebtalk_flutter.STOP_SERVICE"
-        const val ACTION_SET_FOREGROUND = "com.example.gebtalk_flutter.SET_FOREGROUND"
+        const val ACTION_START_SERVICE = "com.gebtalk.app.START_SERVICE"
+        const val ACTION_STOP_SERVICE = "com.gebtalk.app.STOP_SERVICE"
+        const val ACTION_SET_FOREGROUND = "com.gebtalk.app.SET_FOREGROUND"
 
         const val CHANNEL_STATUS_ID = "gebtalk_status_channel"
         const val CHANNEL_CALLS_ID = "gebtalk_calls_channel_v2"

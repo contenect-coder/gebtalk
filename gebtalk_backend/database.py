@@ -145,7 +145,9 @@ def get_db_connection():
     if _use_sqlite_fallback:
         return SQLiteConnectionWrapper()
 
-    db_url = os.environ.get('SUPABASE_DB_URL', '')
+    db_url = (os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL') or '').strip()
+    if db_url.startswith('postgres://'):
+        db_url = 'postgresql://' + db_url[len('postgres://'):]
     if not db_url or 'YOUR_PASSWORD' in db_url:
         _use_sqlite_fallback = True
         return SQLiteConnectionWrapper()

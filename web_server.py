@@ -22,7 +22,14 @@ class DevProxyHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
+    def _normalize_path(self):
+        if self.path.startswith('/gebtalk/'):
+            self.path = self.path[len('/gebtalk'):]
+        elif self.path == '/gebtalk':
+            self.path = '/'
+
     def do_GET(self):
+        self._normalize_path()
         if self.path.startswith('/api/') or self.path == '/api':
             self._proxy()
         else:
@@ -33,18 +40,21 @@ class DevProxyHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        self._normalize_path()
         if self.path.startswith('/api/') or self.path == '/api':
             self._proxy()
         else:
             super().do_POST()
 
     def do_PUT(self):
+        self._normalize_path()
         if self.path.startswith('/api/') or self.path == '/api':
             self._proxy()
         else:
             self.send_error(405)
 
     def do_DELETE(self):
+        self._normalize_path()
         if self.path.startswith('/api/') or self.path == '/api':
             self._proxy()
         else:
