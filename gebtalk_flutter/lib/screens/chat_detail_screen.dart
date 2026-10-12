@@ -26,6 +26,7 @@ import '../widgets/sticker_picker.dart';
 import '../widgets/emoji_picker.dart';
 import '../widgets/email_call_modal.dart';
 import '../widgets/email_compose_modal.dart';
+import '../utils/voice_note_manager.dart';
 
 class ChatDetailScreen extends StatelessWidget {
   const ChatDetailScreen({super.key});
@@ -74,6 +75,11 @@ class _ChatDetailContentState extends State<ChatDetailContent>
   List<int> _searchMatchIndices = [];
   bool _viewOnceMode = false;
 
+  // Real voice recording states
+  bool _isVoiceRecording = false;
+  int _voiceRecordingSeconds = 0;
+  Timer? _voiceRecordingTimer;
+
   // Typing indicator animation
   late AnimationController _typingController;
   late List<Animation<double>> _dotAnimations;
@@ -117,6 +123,7 @@ class _ChatDetailContentState extends State<ChatDetailContent>
 
   @override
   void dispose() {
+    _voiceRecordingTimer?.cancel();
     _pollingTimer?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
@@ -161,11 +168,79 @@ class _ChatDetailContentState extends State<ChatDetailContent>
     }
   }
 
-  void _simulateAudioAttach() async {
+  void _startVoiceRecording() async {
+    final hasPerm = await VoiceNoteManager.hasPermission();
+    if (!hasPerm) {
+      ErrorHandler.showError("Microphone permission is required to record voice notes.");
+      return;
+    }
+    final started = await VoiceNoteManager.startRecording();
+    if (!started) {
+      ErrorHandler.showError("Failed to access microphone for recording.");
+      return;
+    }
+    setState(() {
+      _isVoiceRecording = true;
+      _voiceRecordingSeconds = 0;
+    });
+    _voiceRecordingTimer?.cancel();
+    _voiceRecordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() => _voiceRecordingSeconds++);
+      }
+    });
+  }
+
+  void _cancelVoiceRecording() async {
+    _voiceRecordingTimer?.cancel();
+    await VoiceNoteManager.cancelRecording();
+    if (mounted) {
+      setState(() {
+        _isVoiceRecording = false;
+        _voiceRecordingSeconds = 0;
+      });
+    }
+  }
+
+  void _stopAndSendVoiceRecording() async {
+    _voiceRecordingTimer?.cancel();
+    final durationSecs = _voiceRecordingSeconds;
+    setState(() {
+      _isVoiceRecording = false;
+      _voiceRecordingSeconds = 0;
+      _isUploading = true;
+      _uploadProgress = 0.0;
+    });
+
+    final recordResult = await VoiceNoteManager.stopRecording(durationSecs);
+    if (recordResult == null || recordResult.bytes.isEmpty) {
+      ErrorHandler.showError("No audio was recorded.");
+      setState(() => _isUploading = false);
+      return;
+    }
+
+    final filename = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final uploadedUrl = await ApiService.uploadFile(recordResult.bytes, filename);
+    if (uploadedUrl == null) {
+      ErrorHandler.showError("Failed to upload voice note to server.");
+      setState(() => _isUploading = false);
+      return;
+    }
+
+    if (!mounted) return;
     final appState = Provider.of<AppState>(context, listen: false);
-    final success = await appState.sendMessage('', isAudio: true, duration: "0:42");
-    if (success) {
-      Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+    final success = await appState.sendMessage(
+      uploadedUrl,
+      isAudio: true,
+      duration: recordResult.duration,
+      fileName: 'Voice Note.m4a',
+    );
+
+    if (mounted) {
+      setState(() => _isUploading = false);
+      if (success) {
+        Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+      }
     }
   }
 
@@ -1942,82 +2017,146 @@ class _ChatDetailContentState extends State<ChatDetailContent>
                   }),
                   const SizedBox(width: 2),
                   // Emoji Picker button
-                  _buildIconCircle(Icons.sentiment_satisfied_alt, () {
-                    setState(() {
-                      _showStickerSheet = false;
-                      _showEmojiSheet = !_showEmojiSheet;
-                    });
-                  }),
-                  const SizedBox(width: 2),
-                  // Mic button
-                  _buildIconCircle(Icons.mic_none, _simulateAudioAttach),
-                  const SizedBox(width: 4),
-                  // Text input
-                  Expanded(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      padding: const EdgeInsets.all(1.5),
+                  if (_isVoiceRecording) ...[
+                    // Active voice recording HUD bar
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(22),
-                        gradient: _isInputFocused
-                            ? AppColors.primaryGradient
-                            : const LinearGradient(
-                                colors: [AppColors.border, AppColors.border],
-                              ),
+                        color: Colors.redAccent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
                       ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(20.5),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: TextField(
-                          controller: _msgController,
-                          focusNode: _inputFocusNode,
-                          style: const TextStyle(color: AppColors.textMain, fontSize: 13),
-                          enabled: !_isUploading,
-                          decoration: InputDecoration(
-                            hintText: _selectedFile != null ? "Add a caption..." : "Type a secure message...",
-                            hintStyle: const TextStyle(color: AppColors.textLight),
-                            border: InputBorder.none,
-                          ),
-                          onSubmitted: (_) => _sendMessage(),
-                          onChanged: (text) {
-                            final appState = Provider.of<AppState>(context, listen: false);
-                            if (appState.activeContactId != null) {
-                              appState.sendTypingIndicator(appState.activeContactId!, text.isNotEmpty);
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Send button
-                  TapScaleWidget(
-                    onTap: _isUploading ? () {} : _sendMessage,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: AppColors.orangeGradient,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.orangeGlow.withValues(alpha: 0.4),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const PulsingDot(color: Colors.redAccent, size: 8),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${(_voiceRecordingSeconds ~/ 60)}:${(_voiceRecordingSeconds % 60).toString().padLeft(2, '0')}',
+                            style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
                           ),
                         ],
                       ),
-                      child: _isUploading
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Recording audio note...',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontStyle: FontStyle.italic),
+                      ),
+                    ),
+                    // Trash / Cancel recording
+                    TapScaleWidget(
+                      onTap: _cancelVoiceRecording,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.redAccent.withValues(alpha: 0.2),
+                        ),
+                        child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Send recording button
+                    TapScaleWidget(
+                      onTap: _stopAndSendVoiceRecording,
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: AppColors.primaryGradient,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.4),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.send_rounded, color: Colors.black, size: 18),
+                      ),
+                    ),
+                  ] else ...[
+                    _buildIconCircle(Icons.sentiment_satisfied_alt, () {
+                      setState(() {
+                        _showStickerSheet = false;
+                        _showEmojiSheet = !_showEmojiSheet;
+                      });
+                    }),
+                    const SizedBox(width: 2),
+                    // Real Voice Recording Mic button
+                    _buildIconCircle(Icons.mic, _startVoiceRecording),
+                    const SizedBox(width: 4),
+                    // Text input
+                    Expanded(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        padding: const EdgeInsets.all(1.5),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(22),
+                          gradient: _isInputFocused
+                              ? AppColors.primaryGradient
+                              : const LinearGradient(
+                                  colors: [AppColors.border, AppColors.border],
+                                ),
+                        ),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.background,
+                            borderRadius: BorderRadius.circular(20.5),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: TextField(
+                            controller: _msgController,
+                            focusNode: _inputFocusNode,
+                            style: const TextStyle(color: AppColors.textMain, fontSize: 13),
+                            enabled: !_isUploading,
+                            decoration: InputDecoration(
+                              hintText: _selectedFile != null ? "Add a caption..." : "Type a secure message...",
+                              hintStyle: const TextStyle(color: AppColors.textLight),
+                              border: InputBorder.none,
+                            ),
+                            onSubmitted: (_) => _sendMessage(),
+                            onChanged: (text) {
+                              final appState = Provider.of<AppState>(context, listen: false);
+                              if (appState.activeContactId != null) {
+                                appState.sendTypingIndicator(appState.activeContactId!, text.isNotEmpty);
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Send button
+                    TapScaleWidget(
+                      onTap: _isUploading ? () {} : _sendMessage,
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: AppColors.orangeGradient,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.orangeGlow.withValues(alpha: 0.4),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: _isUploading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -2557,9 +2696,10 @@ class _ChatDetailContentState extends State<ChatDetailContent>
                         ),
                       ),
                     ] else if (msg.isAudio) ...[
-                      // Enhanced WhatsApp Voice Note Waveform Player
-                      _VoiceNotePlayerWidget(
-                        duration: msg.duration ?? "0:42",
+                      // Real WhatsApp Voice Note Waveform Player with real audio playback
+                      VoiceNotePlayerWidget(
+                        audioUrl: msg.text,
+                        duration: msg.duration ?? "0:00",
                         isUser: isUser,
                       ),
                     ] else if (msg.isFile) ...[
@@ -3567,84 +3707,5 @@ class _ChatDetailContentState extends State<ChatDetailContent>
   }
 }
 
-/// WhatsApp Voice Note Waveform Player with 1x / 1.5x / 2x speed toggles
-class _VoiceNotePlayerWidget extends StatefulWidget {
-  final String duration;
-  final bool isUser;
 
-  const _VoiceNotePlayerWidget({required this.duration, required this.isUser});
-
-  @override
-  State<_VoiceNotePlayerWidget> createState() => _VoiceNotePlayerWidgetState();
-}
-
-class _VoiceNotePlayerWidgetState extends State<_VoiceNotePlayerWidget> {
-  bool _isPlaying = false;
-  double _speed = 1.0;
-
-  void _cycleSpeed() {
-    setState(() {
-      if (_speed == 1.0) {
-        _speed = 1.5;
-      } else if (_speed == 1.5) {
-        _speed = 2.0;
-      } else {
-        _speed = 1.0;
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final waveHeights = [8.0, 14.0, 6.0, 20.0, 16.0, 10.0, 22.0, 18.0, 12.0, 15.0, 8.0, 18.0, 14.0, 10.0, 20.0, 6.0];
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: Icon(_isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: widget.isUser ? Colors.white : AppColors.primary, size: 30),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
-          onPressed: () => setState(() => _isPlaying = !_isPlaying),
-        ),
-        const SizedBox(width: 8),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: waveHeights.map((h) {
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 1.5),
-              width: 3,
-              height: h,
-              decoration: BoxDecoration(
-                color: widget.isUser ? Colors.white70 : AppColors.primary.withValues(alpha: 0.8),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          widget.duration,
-          style: TextStyle(color: widget.isUser ? Colors.white70 : AppColors.textMuted, fontSize: 11),
-        ),
-        const SizedBox(width: 6),
-        InkWell(
-          onTap: _cycleSpeed,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              '${_speed}x',
-              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
 

@@ -6,7 +6,7 @@ import sys
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-BASE_URL = 'https://phpbb-intranet-savannah-phys.trycloudflare.com/api'
+BASE_URL = 'http://127.0.0.1:5000/api'
 frank_id = 'franklin_victor_1787048293'
 test01_id = 'test01_1787056957'
 
